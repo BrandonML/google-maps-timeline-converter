@@ -1,16 +1,65 @@
 import React, { useState } from 'react';
 import { Upload, Download, MapPin, Activity, FileJson, FileText, Map, Info } from 'lucide-react';
 
-export default function TimelineConverter() {
-  const [files, setFiles] = useState([]);
+interface Location {
+  latitudeE7: number;
+  longitudeE7: number;
+  placeId?: string;
+  name?: string;
+  address?: string;
+  semanticType?: string;
+}
+
+interface Duration {
+  startTimestamp: string;
+  endTimestamp: string;
+}
+
+interface PlaceVisit {
+  location: Location;
+  duration: Duration;
+  centerLatE7: number;
+  centerLngE7: number;
+  visitConfidence: number;
+}
+
+interface ActivitySegment {
+  startLocation: Partial<Location>;
+  endLocation: Partial<Location>;
+  duration: Duration;
+  distance?: number;
+  activities?: { activityType: string; probability: number }[];
+}
+
+interface TimelineObject {
+  placeVisit?: PlaceVisit;
+  activitySegment?: ActivitySegment;
+}
+
+interface Results {
+  oldFormatJson: string;
+  csv: string;
+  kml: string;
+  visitCount: number;
+  activityCount: number;
+  totalCount: number;
+  originalCount: number;
+  cleaningStats: {
+    removedActivities: number;
+    removedDuplicates: number;
+    totalRemoved: number;
+  };
+}
+
+export default function App() {
+  const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
-  const [results, setResults] = useState(null);
-  const [error, setError] = useState(null);
+  const [results, setResults] = useState<Results | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [removeActivities, setRemoveActivities] = useState(true);
   const [removeDuplicates, setRemoveDuplicates] = useState(true);
-  const [showTooltip, setShowTooltip] = useState(null);
 
-  const parseLatLng = (latLngStr) => {
+  const parseLatLng = (latLngStr?: string): { lat: number; lng: number } => {
     if (!latLngStr) return { lat: 0, lng: 0 };
     const parts = latLngStr.replace('°', '').split(', ');
     return {
@@ -19,11 +68,11 @@ export default function TimelineConverter() {
     };
   };
 
-  const convertNewToOld = (newData) => {
-    const timelineObjects = [];
+  const convertNewToOld = (newData: any): { timelineObjects: TimelineObject[] } => {
+    const timelineObjects: TimelineObject[] = [];
     const segments = newData.semanticSegments || [];
 
-    segments.forEach(segment => {
+    segments.forEach((segment: any) => {
       if (segment.visit) {
         const visit = segment.visit;
         const topCandidate = visit.topCandidate || {};
@@ -107,14 +156,14 @@ export default function TimelineConverter() {
     return { timelineObjects };
   };
 
-  const cleanData = (timelineObjects) => {
+  const cleanData = (timelineObjects: TimelineObject[]) => {
     let cleaned = [...timelineObjects];
     let removedActivities = 0;
     let removedDuplicates = 0;
 
     if (removeActivities) {
       const beforeCount = cleaned.length;
-      cleaned = cleaned.filter(obj => obj.placeVisit);
+      cleaned = cleaned.filter((obj): obj is { placeVisit: PlaceVisit } => !!obj.placeVisit);
       removedActivities = beforeCount - cleaned.length;
     }
 
@@ -122,31 +171,31 @@ export default function TimelineConverter() {
       const seenPlaceIds = new Set();
       const seenLatLngs = new Set();
       const beforeCount = cleaned.length;
-      
-      cleaned = cleaned.filter(obj => {
+
+      cleaned = cleaned.filter((obj) => {
         if (!obj.placeVisit) return true;
-        
+
         const loc = obj.placeVisit.location;
         const hasAddress = loc.address && loc.address.trim() !== '';
-        
+
         if (hasAddress) return true;
-        
+
         if (loc.placeId && loc.placeId.trim() !== '') {
           if (seenPlaceIds.has(loc.placeId)) {
             return false;
           }
           seenPlaceIds.add(loc.placeId);
         }
-        
+
         const latLngKey = `${loc.latitudeE7},${loc.longitudeE7}`;
         if (seenLatLngs.has(latLngKey)) {
           return false;
         }
         seenLatLngs.add(latLngKey);
-        
+
         return true;
       });
-      
+
       removedDuplicates = beforeCount - cleaned.length;
     }
 
@@ -160,11 +209,11 @@ export default function TimelineConverter() {
     };
   };
 
-  const convertToCSV = (data) => {
-    const rows = [];
+  const convertToCSV = (data: { timelineObjects: TimelineObject[] }): string => {
+    const rows: (string | number)[][] = [];
     rows.push(['Type', 'Name', 'Address', 'Latitude', 'Longitude', 'Start Time', 'End Time', 'PlaceId']);
 
-    data.timelineObjects.forEach(obj => {
+    data.timelineObjects.forEach((obj) => {
       if (obj.placeVisit) {
         const pv = obj.placeVisit;
         const loc = pv.location;
@@ -185,8 +234,8 @@ export default function TimelineConverter() {
           'Activity',
           actType,
           '',
-          as.startLocation.latitudeE7 / 1e7,
-          as.startLocation.longitudeE7 / 1e7,
+          (as.startLocation.latitudeE7 ?? 0) / 1e7,
+          (as.startLocation.longitudeE7 ?? 0) / 1e7,
           as.duration.startTimestamp,
           as.duration.endTimestamp,
           ''
@@ -194,10 +243,10 @@ export default function TimelineConverter() {
       }
     });
 
-    return rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    return rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
   };
 
-  const convertToKML = (data) => {
+  const convertToKML = (data: { timelineObjects: TimelineObject[] }): string => {
     let kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
@@ -212,7 +261,7 @@ export default function TimelineConverter() {
     </Style>
 `;
 
-    data.timelineObjects.forEach(obj => {
+    data.timelineObjects.forEach((obj) => {
       if (obj.placeVisit) {
         const pv = obj.placeVisit;
         const loc = pv.location;
@@ -240,8 +289,8 @@ End: ${pv.duration.endTimestamp}</description>
     return kml;
   };
 
-  const handleFileUpload = (e) => {
-    const uploadedFiles = Array.from(e.target.files);
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFiles = e.target.files ? Array.from(e.target.files) : [];
     setFiles(prevFiles => [...prevFiles, ...uploadedFiles]);
     setError(null);
     setResults(null);
@@ -263,7 +312,7 @@ End: ${pv.duration.endTimestamp}</description>
     setError(null);
 
     try {
-      let combinedTimelineObjects = [];
+      let combinedTimelineObjects: TimelineObject[] = [];
 
       for (const file of files) {
         const text = await file.text();
@@ -281,7 +330,7 @@ End: ${pv.duration.endTimestamp}</description>
 
       const { cleaned, stats } = cleanData(combinedTimelineObjects);
       const finalData = { timelineObjects: cleaned };
-      
+
       const csv = convertToCSV(finalData);
       const kml = convertToKML(finalData);
 
@@ -295,14 +344,14 @@ End: ${pv.duration.endTimestamp}</description>
         originalCount: combinedTimelineObjects.length,
         cleaningStats: stats
       });
-    } catch (err) {
+    } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
     } finally {
       setProcessing(false);
     }
   };
 
-  const downloadFile = (content, filename, type) => {
+  const downloadFile = (content: string, filename: string, type: string) => {
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -315,21 +364,22 @@ End: ${pv.duration.endTimestamp}</description>
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 sm:p-8">
       <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-lg shadow-xl p-8">
+        <div className="bg-white rounded-lg shadow-xl p-6 sm:p-8">
           <div className="flex items-center gap-3 mb-6">
             <MapPin className="w-8 h-8 text-indigo-600" />
-            <h1 className="text-3xl font-bold text-gray-800">Google Timeline Converter</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Google Timeline Converter</h1>
           </div>
 
           <div className="mb-8 p-4 bg-blue-50 rounded-lg border border-blue-200">
             <h2 className="font-semibold text-blue-900 mb-2">How to use:</h2>
             <ol className="list-decimal list-inside space-y-1 text-sm text-blue-800">
-              <li>Upload your new Timeline.json file and/or old format JSON files</li>
-              <li>Choose your data cleaning preferences below</li>
-              <li>Click "Process Files" to convert and merge all data</li>
-              <li>Download the converted files in your preferred format</li>
+              <li>Export your data from <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-600">Google Takeout</a> (select only Location History, format JSON).</li>
+              <li>Unzip the file and find your `Timeline.json` file(s) inside the `Location History` folder.</li>
+              <li>Upload your `Timeline.json` file(s) below.</li>
+              <li>Choose your data cleaning preferences.</li>
+              <li>Click "Process Files" and download the results.</li>
             </ol>
           </div>
 
@@ -343,7 +393,7 @@ End: ${pv.duration.endTimestamp}</description>
               multiple
               accept=".json"
               onChange={handleFileUpload}
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
             />
             {files.length > 0 && (
               <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -369,7 +419,7 @@ End: ${pv.duration.endTimestamp}</description>
 
           <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
             <h3 className="font-semibold text-gray-700 mb-3">Data Cleaning Options</h3>
-            
+
             <div className="space-y-3">
               <div className="flex items-start gap-3">
                 <input
@@ -384,17 +434,13 @@ End: ${pv.duration.endTimestamp}</description>
                     <label htmlFor="removeActivities" className="text-sm font-medium text-gray-700 cursor-pointer">
                       Remove activity records
                     </label>
-                    <div className="relative">
-                      <Info 
+                    <div className="relative group">
+                      <Info
                         className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help"
-                        onMouseEnter={() => setShowTooltip('activities')}
-                        onMouseLeave={() => setShowTooltip(null)}
                       />
-                      {showTooltip === 'activities' && (
-                        <div className="absolute left-0 top-6 z-10 w-64 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg">
-                          Removes all "Activity" type records (like driving, walking segments), keeping only "Visit" records which represent actual locations you stayed at. This significantly reduces record count.
-                        </div>
-                      )}
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                        Removes all "Activity" type records (like driving, walking segments), keeping only "Visit" records which represent actual locations you stayed at. This significantly reduces record count.
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -413,17 +459,13 @@ End: ${pv.duration.endTimestamp}</description>
                     <label htmlFor="removeDuplicates" className="text-sm font-medium text-gray-700 cursor-pointer">
                       Remove duplicates
                     </label>
-                    <div className="relative">
-                      <Info 
+                    <div className="relative group">
+                      <Info
                         className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help"
-                        onMouseEnter={() => setShowTooltip('duplicates')}
-                        onMouseLeave={() => setShowTooltip(null)}
                       />
-                      {showTooltip === 'duplicates' && (
-                        <div className="absolute left-0 top-6 z-10 w-64 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg">
-                          Removes duplicate visits based on PlaceId or Lat/Long coordinates, but ONLY when the Address field is blank. Records with addresses are always preserved as they contain valuable information.
-                        </div>
-                      )}
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                        Removes duplicate visits based on PlaceId or Lat/Long coordinates, but ONLY when the Address field is blank. Records with addresses are always preserved as they contain valuable information.
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -434,9 +476,14 @@ End: ${pv.duration.endTimestamp}</description>
           <button
             onClick={processFiles}
             disabled={processing || files.length === 0}
-            className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
-            {processing ? 'Processing...' : 'Process Files'}
+            {processing ? (
+              <><svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>Processing...</>
+            ) : 'Process Files'}
           </button>
 
           {error && (
@@ -446,8 +493,8 @@ End: ${pv.duration.endTimestamp}</description>
           )}
 
           {results && (
-            <div className="mt-8 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="mt-8 space-y-4 animate-fade-in">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
                   <div className="flex items-center gap-2 mb-1">
                     <FileJson className="w-5 h-5 text-blue-600" />
@@ -479,7 +526,7 @@ End: ${pv.duration.endTimestamp}</description>
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="bg-green-50 p-4 rounded-lg border border-green-200">
                   <div className="flex items-center gap-2 mb-1">
                     <MapPin className="w-5 h-5 text-green-600" />
@@ -501,7 +548,7 @@ End: ${pv.duration.endTimestamp}</description>
                   <Download className="w-5 h-5" />
                   Download Converted Files
                 </h3>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <button
                     onClick={() => downloadFile(results.oldFormatJson, 'timeline_converted.json', 'application/json')}
                     className="flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 px-4 rounded-lg transition-colors"
@@ -528,7 +575,7 @@ End: ${pv.duration.endTimestamp}</description>
 
               {results.totalCount > 2000 && (
                 <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
-                  <strong>Note:</strong> You have {results.totalCount} records. Google My Maps limits imports to 2,000 rows. 
+                  <strong>Note:</strong> You have {results.totalCount} records. Google My Maps limits imports to 2,000 rows.
                   Consider enabling the data cleaning options above to reduce the record count, or manually filter your CSV by removing less important local visits.
                 </div>
               )}
