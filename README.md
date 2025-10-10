@@ -1,5 +1,7 @@
 # Google Maps Timeline Converter
 
+Use the app in your browser: https://brandonml.github.io/google-maps-timeline-converter/
+
 ## What Is This App?
 
 Have you ever wanted to see all the places you've been on a map? Google Maps tracks your location history, but in 2024, Google changed how this data is stored and exported. This makes it difficult to:
@@ -51,10 +53,11 @@ This app solves these problems by converting, cleaning, and merging your Google 
 
 ### Using the App
 
-1. **Upload your files** - Select all your old monthly JSON files AND your new Timeline.json file
-2. **Choose cleaning options** - Keep both options checked to remove duplicates and unnecessary data
-3. **Click "Process Files"** - The app merges and cleans everything
-4. **Download your results** - Get CSV (for Google My Maps), KML (for mapping tools), or JSON (for backup)
+1. **Open the Webapp** - Open [the webapp](https://brandonml.github.io/google-maps-timeline-converter/) in your browser
+2. **Upload your files** - Select all your old monthly JSON files AND your new Timeline.json file
+3. **Choose cleaning options** - Keep both options checked to remove duplicates and unnecessary data
+4. **Click "Process Files"** - The app merges and cleans everything
+5. **Download your results** - Get CSV (for Google My Maps), KML (for mapping tools), or JSON (for backup)
 
 ### Privacy Note
 
