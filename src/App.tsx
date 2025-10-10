@@ -446,7 +446,7 @@ End: ${pv.duration.endTimestamp}</description>
           <div className="flex items-center gap-4 mb-10 pb-4 border-b border-gray-100">
             <MapPin className="w-12 h-12 text-blue-600 flex-shrink-0" />
             <div>
-              <h1 className="text-3xl font-extrabold text-gray-900">Timeline Data Processor</h1>
+              <h1 className="text-3xl font-extrabold text-gray-900">Google Maps Timeline Data Converter</h1>
               <p className="text-base text-gray-500 mt-1">Merge, clean, and convert your Google Location History (Old & New Formats)</p>
             </div>
           </div>
