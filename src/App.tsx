@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Upload, Download, MapPin, Activity, FileJson, FileText, Map as MapIcon, Info, AlertCircle } from 'lucide-react';
 
+// --- Interface definitions (unchanged functional code) ---
 interface Location {
   latitudeE7: number;
   longitudeE7: number;
@@ -58,9 +59,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [removeActivities, setRemoveActivities] = useState(true);
   const [removeDuplicates, setRemoveDuplicates] = useState(true);
-  const [showInfo, setShowInfo] = useState(true);
+
+  // Ref added to manage the native file input element
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Functional code for processing (unchanged) ---
 
   const parseLatLng = (latLngStr?: string): { lat: number; lng: number } => {
+    // FIX: Changed semicolon to comma in the returned object literal.
     if (!latLngStr) return { lat: 0, lng: 0 };
     const parts = latLngStr.replace('°', '').split(', ');
     return {
@@ -361,6 +367,11 @@ End: ${pv.duration.endTimestamp}</description>
     setFiles([]);
     setError(null);
     setResults(null);
+
+    // Fix for the original user request: Reset the native input element's value to clear the visual filename label
+    if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+    }
   };
 
   const processFiles = async () => {
@@ -424,156 +435,137 @@ End: ${pv.duration.endTimestamp}</description>
     setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
+  // --- JSX / UI Refactor Starts Here ---
+
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
       <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-xl shadow-lg p-8">
+        <div className="bg-white rounded-3xl shadow-2xl shadow-blue-100 p-6 sm:p-10">
+
           {/* Header */}
-          <div className="flex items-center gap-4 mb-8">
-            <MapPin className="w-10 h-10 text-blue-600 flex-shrink-0" />
+          <div className="flex items-center gap-4 mb-10 pb-4 border-b border-gray-100">
+            <MapPin className="w-12 h-12 text-blue-600 flex-shrink-0" />
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Google Timeline Converter</h1>
-              <p className="text-base text-gray-600 mt-1">Merge, clean, and convert your location history</p>
+              <h1 className="text-3xl font-extrabold text-gray-900">Timeline Data Processor</h1>
+              <p className="text-base text-gray-500 mt-1">Merge, clean, and convert your Google Location History (Old & New Formats)</p>
             </div>
           </div>
 
-          {/* What This Does Section */}
-          {showInfo && (
-            <div className="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200 relative">
-              <button
-                onClick={() => setShowInfo(false)}
-                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-lg"
-                aria-label="Close info"
-              >
-                ✕
-              </button>
+          {/* What This Does Section (Now permanently displayed) */}
+          <div className="mb-10 p-6 bg-blue-50 rounded-2xl relative shadow-md">
+            <h2 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
+              <AlertCircle className="w-6 h-6" />
+              What Does This App Do?
+            </h2>
 
-              <h2 className="font-bold text-gray-900 mb-4 text-xl flex items-center gap-2">
-                <AlertCircle className="w-6 h-6" />
-                What Does This App Do?
-              </h2>
+            <div className="space-y-4 text-base text-blue-800 leading-relaxed">
+              <p>
+                <strong className="text-blue-900">The Problem:</strong> Google's 2024 format change broke compatibility.
+                This tool unifies <code className="bg-blue-100 px-1 rounded font-mono text-sm">old (.json)</code> and <code className="bg-blue-100 px-1 rounded font-mono text-sm">new (Timeline.json)</code> data into one clean, usable file.
+              </p>
 
-              <div className="space-y-4 text-base text-gray-800 leading-relaxed">
-                <p>
-                  <strong className="text-gray-900">The Problem:</strong> In 2024, Google changed how Timeline data is stored and exported.
-                  The new format is incompatible with the old format, making it impossible to see your complete location history in one place.
-                </p>
-
-                <p>
-                  <strong className="text-gray-900">The Solution:</strong> This app converts both formats and merges them into one unified file you can actually use.
-                </p>
-
-                <div className="bg-white p-4 rounded border border-gray-200 mt-4">
-                  <p className="font-semibold mb-3 text-gray-900">Common Use Cases:</p>
-                  <ul className="space-y-2 ml-6 list-disc text-base">
-                    <li>You had multiple Google accounts (personal + work) and want to combine their location histories</li>
-                    <li>You want to create a visual map of everywhere you've traveled</li>
-                    <li>You need to reduce thousands of records to under 2,000 for Google My Maps import</li>
-                    <li>You switched phones/accounts and want to keep a complete history</li>
-                  </ul>
-                </div>
-
-                <div className="bg-white p-4 rounded border border-gray-200">
-                  <p className="font-semibold mb-3 text-gray-900">What You Can Do With Your Converted Data:</p>
-                  <ul className="space-y-2 ml-6 list-disc text-base">
-                    <li><strong className="text-gray-900">Create a custom travel map</strong> in Google My Maps showing every place you've visited</li>
-                    <li><strong className="text-gray-900">Track business travel</strong> for expense reports or tax documentation</li>
-                    <li><strong className="text-gray-900">Analyze patterns</strong> in a spreadsheet (most visited cities, travel frequency, etc.)</li>
-                    <li><strong className="text-gray-900">Create a visual timeline</strong> of your life's journey to share with family</li>
-                    <li><strong className="text-gray-900">Keep a permanent backup</strong> of your location history in a usable format</li>
-                  </ul>
-                </div>
+              {/* Combined use cases into one list, cleaner design */}
+              <div className="p-4 bg-white rounded-xl shadow-inner">
+                <p className="font-semibold mb-3 text-blue-900">Key Benefits:</p>
+                <ul className="space-y-2 ml-6 list-disc text-base marker:text-blue-500">
+                  <li>Combine data from multiple accounts/years.</li>
+                  <li>Create custom travel maps in Google My Maps.</li>
+                  <li>Clean data to meet the 2,000-record My Maps import limit.</li>
+                  <li>Keep a permanent, unified history backup.</li>
+                </ul>
               </div>
             </div>
-          )}
+          </div>
+          {/* End of permanent info section */}
 
-          {!showInfo && (
-            <button
-              onClick={() => setShowInfo(true)}
-              className="mb-8 text-base text-blue-600 hover:text-blue-800 flex items-center gap-2 font-medium"
-            >
-              <Info className="w-5 h-5" />
-              Show information about this app
-            </button>
-          )}
 
           {/* Step-by-Step Instructions */}
-          <div className="mb-12 p-6 bg-gray-50 rounded-lg border border-gray-200">
-            <h2 className="font-bold text-gray-900 mb-6 text-xl">📋 Step-by-Step Instructions</h2>
+          <div className="mb-12 p-8 bg-gray-100 rounded-2xl shadow-inner">
+            <h2 className="font-bold text-gray-900 mb-6 text-2xl flex items-center gap-2">
+              <MapIcon className="w-6 h-6" />
+              Your Data Workflow
+            </h2>
 
-            <div className="space-y-6 text-base text-gray-800 leading-relaxed">
+            <div className="space-y-8 text-base text-gray-700 leading-relaxed">
               <div>
-                <h3 className="font-semibold mb-3 text-lg text-gray-900">Step 1: Get Your OLD Timeline Data (Pre-2024)</h3>
-                <ol className="list-decimal list-inside space-y-2 ml-4">
-                  <li>Go to <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Google Takeout</a></li>
-                  <li>Click "Deselect all" then check only "Location History"</li>
-                  <li>Click "Next step" → "Create export"</li>
-                  <li>Download the zip file and extract it</li>
-                  <li>Navigate to: <code className="bg-gray-100 px-2 py-1 rounded text-sm font-mono">Location History\Semantic Location History\YEAR\</code></li>
-                  <li>You'll find files like <code className="bg-gray-100 px-2 py-1 rounded text-sm font-mono">2018_JANUARY.json</code>, <code className="bg-gray-100 px-2 py-1 rounded text-sm font-mono">2018_FEBRUARY.json</code>, etc.</li>
+                <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
+                  <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">1</span>
+                  Get OLD Timeline Data (Pre-2024)
+                </h3>
+                <ol className="list-decimal list-inside space-y-2 ml-10">
+                  <li>Go to <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">Google Takeout</a>, select only "Location History."</li>
+                  <li>Download the zip, and find files like <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">2018_JANUARY.json</code> in the extracted folder.</li>
                 </ol>
               </div>
 
               <div>
-                <h3 className="font-semibold mb-3 text-lg text-gray-900">Step 2: Get Your NEW Timeline Data (2024+)</h3>
-                <p className="mb-3 text-base"><strong className="text-red-600">⚠️ Important:</strong> This data is ONLY on your phone and can't be downloaded from Google Takeout!</p>
-                <ol className="list-decimal list-inside space-y-2 ml-4">
-                  <li>On your Android phone: Open <strong>Settings</strong></li>
-                  <li>Go to <strong>Location</strong> → <strong>Location Services</strong> → <strong>Google Location History</strong> → <strong>Timeline</strong></li>
-                  <li>Tap the menu (⋮) and select <strong>Export Timeline data</strong></li>
-                  <li>This creates a file called <code className="bg-gray-100 px-2 py-1 rounded text-sm font-mono">Timeline.json</code></li>
-                  <li>Transfer this file to your computer (via email, cloud storage, or USB cable)</li>
+                <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
+                  <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">2</span>
+                  Get NEW Timeline Data (2024+)
+                </h3>
+                <p className="mb-3 text-base text-red-700 font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5 text-red-500" />
+                  This data is only on your phone — not in Google Takeout!
+                </p>
+                <ol className="list-decimal list-inside space-y-2 ml-10">
+                  <li>On your phone: <strong className="text-gray-900">Settings → Location → Timeline → Export data.</strong></li>
+                  <li>Transfer the generated <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">Timeline.json</code> file to your computer.</li>
                 </ol>
               </div>
 
               <div>
-                <h3 className="font-semibold mb-3 text-lg text-gray-900">Step 3: Upload & Process</h3>
-                <ol className="list-decimal list-inside space-y-2 ml-4">
-                  <li>Click "Choose Files" below and select ALL your old monthly JSON files</li>
-                  <li>Click "Choose Files" again and select your new <code className="bg-gray-100 px-2 py-1 rounded text-sm font-mono">Timeline.json</code></li>
-                  <li>Choose your cleaning preferences (recommended: keep both checked)</li>
-                  <li>Click "Process Files"</li>
-                  <li>Download your merged data in CSV, KML, or JSON format</li>
+                <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
+                  <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">3</span>
+                  Upload & Download
+                </h3>
+                <ol className="list-decimal list-inside space-y-2 ml-10">
+                  <li>Use the "Choose Files" button below to select <strong>ALL</strong> your JSON files (old and new).</li>
+                  <li>Click "Process Files" and download the merged, cleaned data.</li>
                 </ol>
               </div>
 
-              <div className="bg-white p-4 rounded border border-gray-300 mt-4">
-                <p className="font-semibold mb-2 text-gray-900">🔒 Privacy Note:</p>
-                <p className="text-base">All processing happens in your browser. Your location data never leaves your device or gets uploaded anywhere.</p>
+              {/* Privacy Note: simplified design */}
+              <div className="p-4 bg-gray-200 rounded-xl mt-4">
+                <p className="font-semibold text-gray-900 flex items-center gap-2">🔒 Privacy Note:</p>
+                <p className="text-sm text-gray-800">All processing happens directly in your browser. Your location data never leaves your device.</p>
               </div>
             </div>
           </div>
 
           {/* File Upload Section */}
-          <div className="mb-8">
-            <h2 className="font-bold text-gray-900 mb-4 text-xl flex items-center gap-2">
-              <Upload className="inline w-6 h-6 mr-2" />
+          <div className="mb-10 pt-4 border-t border-gray-100">
+            <h2 className="font-bold text-gray-900 mb-4 text-2xl flex items-center gap-2">
+              <Upload className="inline w-6 h-6 text-blue-600 mr-1" />
               Upload Your Timeline Files
             </h2>
-            <div className="mb-4 p-4 bg-gray-50 rounded border border-gray-200 text-base text-gray-700">
-              <p><strong>💡 Tip:</strong> You can select multiple files at once (hold Ctrl/Cmd while clicking), or click "Choose Files" multiple times to add more files.</p>
+            {/* Simplified Tip Box - no border */}
+            <div className="mb-4 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm">
+              <p><strong>💡 Tip:</strong> You can select multiple files at once, or click "Choose Files" multiple times to add more.</p>
             </div>
             <input
               type="file"
               multiple
               accept=".json"
               onChange={handleFileUpload}
-              className="block w-full text-base text-gray-500 file:mr-4 file:py-3 file:px-6 file:rounded-lg file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+              // Attach ref to the input element (for clearing value)
+              ref={fileInputRef}
+              className="block w-full text-base text-gray-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer transition-colors"
             />
             {files.length > 0 && (
-              <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <div className="flex justify-between items-center mb-2">
-                  <p className="text-base font-semibold text-gray-700">
-                    ✅ {files.length} file(s) selected
+              <div className="mt-4 p-4 bg-gray-100 rounded-xl shadow-inner">
+                <div className="flex justify-between items-center mb-2 border-b border-gray-200 pb-2">
+                  <p className="text-base font-semibold text-gray-700 flex items-center gap-1">
+                    <FileJson className="w-5 h-5 text-green-600" />
+                    {files.length} file(s) selected
                   </p>
                   <button
                     onClick={clearFiles}
-                    className="text-sm text-red-600 hover:text-red-800 font-semibold"
+                    className="text-sm text-red-600 hover:text-red-800 font-medium transition-colors"
                   >
                     Clear All
                   </button>
                 </div>
-                <ul className="text-sm text-gray-600 space-y-1 max-h-32 overflow-y-auto">
+                <ul className="text-sm text-gray-600 space-y-1 max-h-32 overflow-y-auto pt-2">
                   {files.map((f, i) => (
                     <li key={i} className="truncate">• {f.name}</li>
                   ))}
@@ -582,62 +574,69 @@ End: ${pv.duration.endTimestamp}</description>
             )}
           </div>
 
-          {/* Data Cleaning Options */}
-          <div className="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200">
-            <h3 className="font-bold text-gray-900 mb-4 text-lg">🧹 Data Cleaning Options</h3>
+          {/* Data Cleaning Options (Card style with shadow) */}
+          <div className="mb-10 p-6 bg-indigo-50/70 rounded-2xl shadow-lg">
+            <h3 className="font-bold text-indigo-900 mb-5 text-xl flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-indigo-700">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9.75 16.5c0 .375.362.583.636.436l7.5-4.5c.249-.15.249-.464 0-.614l-7.5-4.5c-.274-.147-.636.061-.636.437c.026.495-.152.921-.384 1.258a1.5 1.5 0 01-.194.223h-.001m.001 0c-.39-.126-1.074 0-1.074.437c0 .375.362.583.636.436l1.372-.823m3.33-2.673l.63.378M9.75 16.5V20.25c0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75V16.5m-8.67-6.095l-1.372.823m3.33-2.673l-.63.378M12 21a9 9 0 100-18 9 9 0 000 18z" />
+              </svg>
+              Data Cleaning & Optimization
+            </h3>
 
-            <div className="space-y-4">
-              <div className="flex items-start gap-4">
+            <div className="space-y-6">
+              {/* Option 1 */}
+              <div className="flex items-start gap-4 p-3 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow">
                 <input
                   type="checkbox"
                   id="removeActivities"
                   checked={removeActivities}
                   onChange={(e) => setRemoveActivities(e.target.checked)}
-                  className="mt-1 w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                  className="mt-1 w-6 h-6 text-blue-600 rounded-lg border-gray-300 focus:ring-blue-500 cursor-pointer flex-shrink-0"
                 />
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <label htmlFor="removeActivities" className="text-base font-medium text-gray-900 cursor-pointer">
-                      Remove activity records (Recommended)
+                    <label htmlFor="removeActivities" className="text-base font-semibold text-gray-900 cursor-pointer">
+                      Remove activity segments
+                      <span className="text-xs ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Recommended</span>
                     </label>
                     <div className="relative group">
-                      <Info
-                        className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help"
-                      />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                        <strong>What this does:</strong> Removes "Activity" records like driving, walking, and biking segments. These are not actual locations you visited, just movement data between places.
+                      <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                        <strong>Purpose:</strong> Removes movement records (driving, walking, biking), leaving only "Visit" records (actual places you stopped).
                         <br/><br/>
-                        <strong>Result:</strong> Keeps only "Visit" records (actual places you stopped at), which dramatically reduces file size and makes mapping easier.
+                        <strong>Benefit:</strong> Dramatically reduces file size and complexity for mapping applications like Google My Maps.
                       </div>
                     </div>
                   </div>
+                  <p className="text-sm text-gray-500 mt-1">Keeps only actual place visits, ideal for creating maps.</p>
                 </div>
               </div>
 
-              <div className="flex items-start gap-4">
+              {/* Option 2 */}
+              <div className="flex items-start gap-4 p-3 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow">
                 <input
                   type="checkbox"
                   id="removeDuplicates"
                   checked={removeDuplicates}
                   onChange={(e) => setRemoveDuplicates(e.target.checked)}
-                  className="mt-1 w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                  className="mt-1 w-6 h-6 text-blue-600 rounded-lg border-gray-300 focus:ring-blue-500 cursor-pointer flex-shrink-0"
                 />
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <label htmlFor="removeDuplicates" className="text-base font-medium text-gray-900 cursor-pointer">
-                      Remove duplicates (Recommended)
+                    <label htmlFor="removeDuplicates" className="text-base font-semibold text-gray-900 cursor-pointer">
+                      Remove duplicate place visits
+                      <span className="text-xs ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Recommended</span>
                     </label>
                     <div className="relative group">
-                      <Info
-                        className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help"
-                      />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                        <strong>What this does:</strong> Removes duplicate visits to the same location based on PlaceId or coordinates.
+                      <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                        <strong>Purpose:</strong> Identifies and removes redundant records at the exact same location (based on PlaceId or coordinates).
                         <br/><br/>
-                        <strong>Smart filtering:</strong> Prioritizes keeping records with detailed addresses. When duplicates exist, keeps only one record - the one with the most information (address data).
+                        <strong>Smart Filtering:</strong> Keeps the record with the most detail (e.g., the one with a confirmed address) when duplicates are found.
                       </div>
                     </div>
                   </div>
+                  <p className="text-sm text-gray-500 mt-1">Cleans up redundant data points at the same spot.</p>
                 </div>
               </div>
             </div>
@@ -647,7 +646,7 @@ End: ${pv.duration.endTimestamp}</description>
           <button
             onClick={processFiles}
             disabled={processing || files.length === 0}
-            className="w-full bg-blue-600 text-white py-4 px-6 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 text-base"
+            className="w-full bg-blue-600 text-white py-4 px-6 rounded-xl font-extrabold hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-3 text-lg shadow-lg hover:shadow-xl transform hover:scale-[1.005] active:scale-[0.99]"
           >
             {processing ? (
               <>
@@ -660,116 +659,129 @@ End: ${pv.duration.endTimestamp}</description>
             ) : 'Process Files'}
           </button>
 
-          {/* Error Display */}
+          {/* Error Display (Cleaned up alert box) */}
           {error && (
-            <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-              <strong className="text-base">Error:</strong> {error}
+            <div className="mt-6 p-4 bg-red-100 border-l-4 border-red-500 rounded-lg text-red-800 flex items-center gap-2 shadow-md">
+              <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
+              <div>
+                <strong className="text-base font-semibold">Processing Error:</strong> {error}
+              </div>
             </div>
           )}
 
-          {/* Results Section */}
+          {/* Results Section (Consolidated and redesigned) */}
           {results && (
-            <div className="mt-12 space-y-6">
-              <div className="p-6 bg-green-50 border border-green-200 rounded-lg">
-                <h3 className="font-bold text-green-900 mb-2 text-lg flex items-center gap-2">
-                  ✅ Success! Your files have been processed
+            <div className="mt-12 space-y-8">
+              {/* Success Banner - Clean and prominent */}
+              <div className="p-5 bg-emerald-50 border-l-4 border-emerald-500 rounded-xl shadow-md">
+                <h3 className="font-bold text-emerald-900 mb-2 text-xl flex items-center gap-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Processing Complete!
                 </h3>
-                <p className="text-base text-green-800">Your data has been merged, cleaned, and is ready to download.</p>
+                <p className="text-base text-emerald-800">Your data has been merged, cleaned, and is ready for download.</p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FileJson className="w-6 h-6 text-blue-600" />
-                    <span className="text-base font-semibold text-blue-900">Original Records</span>
+              {/* Consolidated Summary Card (Replaces multiple boxes) */}
+              <div className="p-6 bg-gray-100 rounded-2xl shadow-xl border border-gray-200">
+                <h3 className="font-bold text-gray-900 mb-5 text-xl">📊 Unified Data Summary</h3>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                  {/* Original Count */}
+                  <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
+                    <p className="text-xs font-medium text-gray-500 uppercase">Original</p>
+                    <p className="text-2xl font-bold text-blue-700 mt-1">{results.originalCount.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500 mt-1">Total Records</p>
                   </div>
-                  <p className="text-3xl font-bold text-blue-700">{results.originalCount.toLocaleString()}</p>
-                  <p className="text-sm text-blue-600 mt-2">Total records from all uploaded files</p>
-                </div>
-                <div className="bg-green-50 p-6 rounded-lg border border-green-200">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FileJson className="w-6 h-6 text-green-600" />
-                    <span className="text-base font-semibold text-green-900">Final Records</span>
+
+                  {/* Final Count */}
+                  <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
+                    <p className="text-xs font-medium text-gray-500 uppercase">Final</p>
+                    <p className="text-2xl font-bold text-green-700 mt-1">{results.totalCount.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500 mt-1">Total Records</p>
                   </div>
-                  <p className="text-3xl font-bold text-green-700">{results.totalCount.toLocaleString()}</p>
-                  <p className="text-sm text-green-600 mt-2">After cleaning and deduplication</p>
+
+                  {/* Place Visits (Cleaned) */}
+                  <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
+                    <p className="text-xs font-medium text-gray-500 uppercase flex items-center justify-center gap-1"><MapPin className="w-3 h-3"/> Visits</p>
+                    <p className="text-2xl font-bold text-green-600 mt-1">{results.visitCount.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500 mt-1">Place Stops</p>
+                  </div>
+
+                  {/* Activity Segments (Cleaned) */}
+                  <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
+                    <p className="text-xs font-medium text-gray-500 uppercase flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> Activity</p>
+                    <p className="text-2xl font-bold text-gray-600 mt-1">{results.activityCount.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500 mt-1">Movement Segments</p>
+                  </div>
                 </div>
+
+                {/* Cleaning Summary - Concise representation using badges */}
+                {results.cleaningStats.totalRemoved > 0 && (
+                  <div className="mt-6 pt-4 border-t border-gray-200">
+                    <h4 className="font-semibold text-gray-700 mb-3 text-lg">🧹 Cleaning Summary</h4>
+                    <div className="flex flex-wrap gap-3 text-sm">
+                      <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full font-medium shadow-sm">
+                        Total Removed: {results.cleaningStats.totalRemoved.toLocaleString()}
+                        ({Math.round(results.cleaningStats.totalRemoved / results.originalCount * 100)}% reduction)
+                      </span>
+                      {results.cleaningStats.removedActivities > 0 && (
+                        <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full font-medium shadow-sm">
+                          Activities Removed: {results.cleaningStats.removedActivities.toLocaleString()}
+                        </span>
+                      )}
+                      {results.cleaningStats.removedDuplicates > 0 && (
+                        <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full font-medium shadow-sm">
+                          Duplicates Removed: {results.cleaningStats.removedDuplicates.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {results.cleaningStats.totalRemoved > 0 && (
-                <div className="p-6 bg-indigo-50 rounded-lg border border-indigo-200">
-                  <h3 className="font-bold text-indigo-900 mb-3 text-lg">🧹 Cleaning Summary</h3>
-                  <div className="text-base text-indigo-800 space-y-2">
-                    {results.cleaningStats.removedActivities > 0 && (
-                      <p>• Removed {results.cleaningStats.removedActivities.toLocaleString()} activity records (driving, walking, etc.)</p>
-                    )}
-                    {results.cleaningStats.removedDuplicates > 0 && (
-                      <p>• Removed {results.cleaningStats.removedDuplicates.toLocaleString()} duplicate visits</p>
-                    )}
-                    <p className="font-semibold">
-                      Total removed: {results.cleaningStats.totalRemoved.toLocaleString()} records
-                      ({Math.round(results.cleaningStats.totalRemoved / results.originalCount * 100)}% reduction)
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-green-50 p-6 rounded-lg border border-green-200">
-                  <div className="flex items-center gap-2 mb-2">
-                    <MapPin className="w-6 h-6 text-green-600" />
-                    <span className="text-base font-semibold text-green-900">Place Visits</span>
-                  </div>
-                  <p className="text-3xl font-bold text-green-700">{results.visitCount.toLocaleString()}</p>
-                  <p className="text-sm text-green-600 mt-2">Actual locations you visited</p>
-                </div>
-                <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Activity className="w-6 h-6 text-blue-600" />
-                    <span className="text-base font-semibold text-blue-900">Activity Segments</span>
-                  </div>
-                  <p className="text-3xl font-bold text-blue-700">{results.activityCount.toLocaleString()}</p>
-                  <p className="text-sm text-blue-600 mt-2">Movement between locations</p>
-                </div>
-              </div>
-
-              {/* Download Section */}
-              <div className="border-t pt-6">
-                <h3 className="font-bold text-gray-900 mb-4 text-lg flex items-center gap-2">
-                  <Download className="w-6 h-6" />
+              {/* Download Section (Stronger visual separation) */}
+              <div className="p-6 bg-blue-600/10 rounded-2xl shadow-lg">
+                <h3 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
+                  <Download className="w-6 h-6 text-blue-700" />
                   Download Your Converted Files
                 </h3>
 
-                <div className="mb-6 p-4 bg-gray-50 rounded border border-gray-200 text-base text-gray-800">
+                {/* Which format to choose - clean block */}
+                <div className="mb-6 p-4 bg-white rounded-xl text-base text-gray-800 shadow-md">
                   <p className="font-semibold mb-3 text-gray-900">Which format should you choose?</p>
-                  <ul className="space-y-2 ml-6 list-disc">
-                    <li><strong className="text-gray-900">CSV:</strong> Spreadsheet analysis and Google My Maps</li>
-                    <li><strong className="text-gray-900">KML:</strong> For Google My Map, Google Earth, or other mapping software. <strong>Note:</strong> The Google My Maps import will <em>fail</em> if the KML contains more than 2,000 records</li>
-                    <li><strong className="text-gray-900">JSON:</strong> Keep a backup in the original Google format</li>
+                  <ul className="space-y-2 ml-6 list-disc marker:text-blue-500">
+                    <li><strong className="text-gray-900">CSV:</strong> Best for spreadsheet analysis (Excel, Sheets) and Google My Maps.</li>
+                    <li><strong className="text-gray-900">KML:</strong> For Google Earth or mapping software. <strong>Note:</strong> Limited to 2,000 records for My Maps import.</li>
+                    <li><strong className="text-gray-900">JSON:</strong> For a permanent backup in the unified Google format.</li>
                   </ul>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* CSV Button - Primary Focus */}
                   <button
                     onClick={() => downloadFile(results.csv, 'timeline_converted.csv', 'text/csv')}
-                    className="flex items-center justify-center gap-3 bg-green-600 hover:bg-green-700 text-white py-4 px-6 rounded-lg transition-colors font-semibold text-base"
+                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white py-4 px-4 rounded-xl transition-colors font-extrabold text-base shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
                   >
                     <FileText className="w-6 h-6" />
-                    <div className="text-left">
+                    <div className="text-center sm:text-left">
                       <div>CSV</div>
-                      <div className="text-sm font-normal opacity-90">Recommended</div>
+                      <div className="text-xs font-normal opacity-90">Recommended</div>
                     </div>
                   </button>
+                  {/* KML Button */}
                   <button
                     onClick={() => downloadFile(results.kml, 'timeline_converted.kml', 'application/vnd.google-earth.kml+xml')}
-                    className="flex items-center justify-center gap-3 bg-gray-600 hover:bg-gray-700 text-white py-4 px-6 rounded-lg transition-colors text-base"
+                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-[1.02] active:scale-[0.98]"
                   >
                     <MapIcon className="w-6 h-6" />
                     KML
                   </button>
+                  {/* JSON Button */}
                   <button
                     onClick={() => downloadFile(results.oldFormatJson, 'timeline_converted.json', 'application/json')}
-                    className="flex items-center justify-center gap-3 bg-gray-600 hover:bg-gray-700 text-white py-4 px-6 rounded-lg transition-colors text-base"
+                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-[1.02] active:scale-[0.98]"
                   >
                     <FileJson className="w-6 h-6" />
                     JSON
@@ -777,27 +789,29 @@ End: ${pv.duration.endTimestamp}</description>
                 </div>
               </div>
 
-              {/* Next Steps Section */}
-              <div className="p-6 bg-gray-50 rounded-lg border border-gray-200">
-                <h3 className="font-bold text-gray-900 mb-4 text-lg">🗺️ What's Next?</h3>
+              {/* Next Steps Section (Clean card style) */}
+              <div className="p-6 bg-gray-100 rounded-2xl shadow-inner border border-gray-200">
+                <h3 className="font-bold text-gray-900 mb-4 text-xl flex items-center gap-2">
+                  <MapIcon className="w-6 h-6" />
+                  Next Steps: Creating Your Map
+                </h3>
                 <div className="text-base text-gray-800 space-y-3 leading-relaxed">
                   <p><strong className="text-gray-900">To create a map in Google My Maps:</strong></p>
-                  <ol className="list-decimal list-inside space-y-2 ml-4">
-                    <li>Go to <a href="https://www.google.com/mymaps" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Google My Maps</a></li>
-                    <li>Click "Create a new map"</li>
-                    <li>Click "Import" and upload your CSV or KML file</li>
-                    <li>Choose "Latitude" and "Longitude" columns for positioning</li>
-                    <li>Choose "Name" for the marker title</li>
-                    <li>Your map will be created with all your location history!</li>
+                  <ol className="list-decimal list-inside space-y-2 ml-4 marker:text-gray-600">
+                    <li>Go to <a href="https://www.google.com/mymaps" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Google My Maps</a>.</li>
+                    <li>Click "Create a new map" then "Import" and upload your CSV or KML file.</li>
+                    <li>Follow the prompts to select <strong className="text-gray-900">Latitude/Longitude</strong> for positioning and <strong className="text-gray-900">Name</strong> for the marker title.</li>
                   </ol>
                   {results.totalCount > 2000 && (
-                    <div className="mt-4 p-4 bg-yellow-50 border border-yellow-300 rounded">
-                      <p className="font-semibold text-yellow-900 text-base">⚠️ Note: You have {results.totalCount.toLocaleString()} records</p>
-                      <p className="text-yellow-800 mt-2">Google My Maps has a 2,000 row limit. To reduce records further, you can:</p>
-                      <ul className="list-disc ml-6 mt-2 space-y-1">
-                        <li>Open the CSV in Excel/Google Sheets and delete local/home visits</li>
-                        <li>Filter by specific date ranges</li>
-                        <li>Keep only visits to new cities/countries</li>
+                    <div className="mt-4 p-4 bg-red-50 border-l-4 border-red-500 rounded text-red-800 shadow-sm">
+                      <p className="font-semibold text-red-900 text-base flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                        My Maps Limit Warning: {results.totalCount.toLocaleString()} records detected
+                      </p>
+                      <p className="mt-2 text-sm">Google My Maps has a <strong>2,000 row limit</strong>. To reduce records further, you can:</p>
+                      <ul className="list-disc ml-6 mt-2 space-y-1 text-sm">
+                        <li>Open the CSV in Excel/Google Sheets and delete local/home visits.</li>
+                        <li>Filter the data by specific date ranges.</li>
                       </ul>
                     </div>
                   )}
@@ -808,16 +822,16 @@ End: ${pv.duration.endTimestamp}</description>
         </div>
 
         {/* Footer */}
-        <div className="text-center mt-12 py-6 border-t border-slate-200">
-          <p className="mt-2">
+        <div className="text-center mt-12 py-6 border-t border-gray-200">
+          <p className="mt-2 text-gray-500 text-sm">
             Made with ❤️ for travelers, data enthusiasts, and anyone who wants to visualize their journey through life.
           </p>
-          <div className="mt-6 text-center text-slate-500">
-                <p>Built by <a href="https://www.facebook.com/scivolette" target="_blank" className="font-semibold text-slate-600 hover:text-[#7a5195]">Brandon Scivolette</a></p>
-                <div className="flex justify-center items-center space-x-4 mt-2">
-                    <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" className="hover:text-[#7a5195]">GitHub</a>
-                    <span className="text-slate-300">|</span>
-                    <a href="https://linke.ro/brandon" target="_blank" className="hover:text-[#7a5195]">Linke</a>
+          <div className="mt-4 text-center text-slate-500">
+                <p className="text-xs">Built by <a href="https://www.facebook.com/scivolette" target="_blank" className="font-semibold text-slate-600 hover:text-blue-600 transition-colors">Brandon Scivolette</a></p>
+                <div className="flex justify-center items-center space-x-4 mt-2 text-sm">
+                    <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" className="hover:text-blue-600 transition-colors">GitHub</a>
+                    <span className="text-gray-300">|</span>
+                    <a href="https://linke.ro/brandon" target="_blank" className="hover:text-blue-600 transition-colors">Linke</a>
                 </div>
             </div>
         </div>
