@@ -823,15 +823,15 @@ End: ${pv.duration.endTimestamp}</description>
 
         {/* Footer */}
         <div className="text-center mt-12 py-6 border-t border-gray-200">
-          <p className="mt-2 text-gray-500 text-sm">
+          <p className="mt-2 text-gray-500">
             Made with ❤️ for travelers, data enthusiasts, and anyone who wants to visualize their journey through life.
           </p>
           <div className="mt-4 text-center text-slate-500">
-                <p className="text-xs">Built by <a href="https://www.facebook.com/scivolette" target="_blank" className="font-semibold text-slate-600 hover:text-blue-600 transition-colors">Brandon Scivolette</a></p>
-                <div className="flex justify-center items-center space-x-4 mt-2 text-sm">
-                    <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" className="hover:text-blue-600 transition-colors">GitHub</a>
+                <p>Built by <a href="https://www.facebook.com/scivolette" target="_blank" className="font-semibold text-slate-600 hover:text-blue-600 transition-colors underline">Brandon Scivolette</a></p>
+                <div className="flex justify-center items-center space-x-4 mt-2">
+                    <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" className="hover:text-blue-600 transition-colors underline">GitHub</a>
                     <span className="text-gray-300">|</span>
-                    <a href="https://linke.ro/brandon" target="_blank" className="hover:text-blue-600 transition-colors">Linke</a>
+                    <a href="https://linke.ro/brandon" target="_blank" className="hover:text-blue-600 transition-colors underline">Linke</a>
                 </div>
             </div>
         </div>
