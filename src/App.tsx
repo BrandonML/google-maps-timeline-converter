@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, Download, MapPin, Activity, FileJson, FileText, Map, Info, AlertCircle } from 'lucide-react';
+import { Upload, Download, MapPin, Activity, FileJson, FileText, Map as MapIcon, Info, AlertCircle } from 'lucide-react';
 
 interface Location {
   latitudeE7: number;
@@ -169,34 +169,94 @@ export default function App() {
     }
 
     if (removeDuplicates) {
-      const seenPlaceIds = new Set();
-      const seenLatLngs = new Set();
       const beforeCount = cleaned.length;
 
-      cleaned = cleaned.filter((obj) => {
-        if (!obj.placeVisit) return true;
+      // Step 1: Deduplicate by PlaceId first (for records that have one)
+      const placeIdMap = new Map<string, TimelineObject[]>();
+      const noPlaceIdRecords: TimelineObject[] = [];
+
+      cleaned.forEach((obj) => {
+        if (!obj.placeVisit) {
+          noPlaceIdRecords.push(obj);
+          return;
+        }
 
         const loc = obj.placeVisit.location;
-        const hasAddress = loc.address && loc.address.trim() !== '';
+        const placeId = loc.placeId && loc.placeId.trim() !== '' ? loc.placeId.trim() : null;
 
-        if (hasAddress) return true;
-
-        if (loc.placeId && loc.placeId.trim() !== '') {
-          if (seenPlaceIds.has(loc.placeId)) {
-            return false;
+        if (placeId) {
+          if (!placeIdMap.has(placeId)) {
+            placeIdMap.set(placeId, []);
           }
-          seenPlaceIds.add(loc.placeId);
+          placeIdMap.get(placeId)!.push(obj);
+        } else {
+          noPlaceIdRecords.push(obj);
         }
-
-        const latLngKey = `${loc.latitudeE7},${loc.longitudeE7}`;
-        if (seenLatLngs.has(latLngKey)) {
-          return false;
-        }
-        seenLatLngs.add(latLngKey);
-
-        return true;
       });
 
+      // Pick best record for each PlaceId group
+      const recordsAfterPlaceIdDedup: TimelineObject[] = [];
+
+      placeIdMap.forEach((group) => {
+        if (group.length === 1) {
+          recordsAfterPlaceIdDedup.push(group[0]);
+        } else {
+          // Multiple records with same PlaceId - prioritize those with addresses
+          const withAddress = group.filter(obj => {
+            const loc = obj.placeVisit?.location;
+            return loc?.address && loc.address.trim() !== '';
+          });
+
+          if (withAddress.length > 0) {
+            recordsAfterPlaceIdDedup.push(withAddress[0]);
+          } else {
+            recordsAfterPlaceIdDedup.push(group[0]);
+          }
+        }
+      });
+
+      // Step 2: Combine all records and deduplicate by LatLng
+      const allRecordsAfterPlaceIdDedup = [...recordsAfterPlaceIdDedup, ...noPlaceIdRecords];
+      const latLngMap = new Map<string, TimelineObject[]>();
+
+      allRecordsAfterPlaceIdDedup.forEach((obj) => {
+        if (!obj.placeVisit) {
+          // Keep non-visit records as-is with unique keys
+          latLngMap.set(`activity-${Math.random()}`, [obj]);
+          return;
+        }
+
+        const loc = obj.placeVisit.location;
+        const latLngKey = `${loc.latitudeE7},${loc.longitudeE7}`;
+
+        if (!latLngMap.has(latLngKey)) {
+          latLngMap.set(latLngKey, []);
+        }
+        latLngMap.get(latLngKey)!.push(obj);
+      });
+
+      // Pick best record for each LatLng group
+      const finalRecords: TimelineObject[] = [];
+
+      latLngMap.forEach((group) => {
+        if (group.length === 1) {
+          finalRecords.push(group[0]);
+        } else {
+          // Multiple records at same coordinates - prioritize those with addresses
+          const withAddress = group.filter(obj => {
+            const loc = obj.placeVisit?.location;
+            return loc?.address && loc.address.trim() !== '';
+          });
+
+          if (withAddress.length > 0) {
+            finalRecords.push(withAddress[0]);
+          } else {
+            finalRecords.push(group[0]);
+          }
+        }
+      });
+
+      cleaned = finalRecords;
       removedDuplicates = beforeCount - cleaned.length;
     }
 
@@ -379,7 +439,7 @@ End: ${pv.duration.endTimestamp}</description>
 
           {/* What This Does Section */}
           {showInfo && (
-            <div className="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200">
+            <div className="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200 relative">
               <button
                 onClick={() => setShowInfo(false)}
                 className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-lg"
@@ -574,7 +634,7 @@ End: ${pv.duration.endTimestamp}</description>
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
                         <strong>What this does:</strong> Removes duplicate visits to the same location based on PlaceId or coordinates.
                         <br/><br/>
-                        <strong>Smart filtering:</strong> Only removes duplicates when the Address field is blank. Records with detailed addresses are always kept because they contain valuable information.
+                        <strong>Smart filtering:</strong> Prioritizes keeping records with detailed addresses. When duplicates exist, keeps only one record - the one with the most information (address data).
                       </div>
                     </div>
                   </div>
@@ -704,7 +764,7 @@ End: ${pv.duration.endTimestamp}</description>
                     onClick={() => downloadFile(results.kml, 'timeline_converted.kml', 'application/vnd.google-earth.kml+xml')}
                     className="flex items-center justify-center gap-3 bg-gray-600 hover:bg-gray-700 text-white py-4 px-6 rounded-lg transition-colors text-base"
                   >
-                    <Map className="w-6 h-6" />
+                    <MapIcon className="w-6 h-6" />
                     KML
                   </button>
                   <button
