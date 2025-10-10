@@ -683,8 +683,8 @@ End: ${pv.duration.endTimestamp}</description>
                 <div className="mb-6 p-4 bg-gray-50 rounded border border-gray-200 text-base text-gray-800">
                   <p className="font-semibold mb-3 text-gray-900">Which format should you choose?</p>
                   <ul className="space-y-2 ml-6 list-disc">
-                    <li><strong className="text-gray-900">CSV:</strong> Best for Google My Maps import or spreadsheet analysis</li>
-                    <li><strong className="text-gray-900">KML:</strong> For Google Earth or other mapping software</li>
+                    <li><strong className="text-gray-900">CSV:</strong> Spreadsheet analysis and Google My Maps</li>
+                    <li><strong className="text-gray-900">KML:</strong> For Google My Map, Google Earth, or other mapping software. <strong>Note:</strong> The Google My Maps import will <em>fail</em> if the KML contains more than 2,000 records</li>
                     <li><strong className="text-gray-900">JSON:</strong> Keep a backup in the original Google format</li>
                   </ul>
                 </div>
@@ -725,7 +725,7 @@ End: ${pv.duration.endTimestamp}</description>
                   <ol className="list-decimal list-inside space-y-2 ml-4">
                     <li>Go to <a href="https://www.google.com/mymaps" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Google My Maps</a></li>
                     <li>Click "Create a new map"</li>
-                    <li>Click "Import" and upload your CSV file</li>
+                    <li>Click "Import" and upload your CSV or KML file</li>
                     <li>Choose "Latitude" and "Longitude" columns for positioning</li>
                     <li>Choose "Name" for the marker title</li>
                     <li>Your map will be created with all your location history!</li>
