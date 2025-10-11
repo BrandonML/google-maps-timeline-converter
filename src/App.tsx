@@ -856,7 +856,7 @@ const processFiles = async () => {
                     <li><strong className="text-gray-900">KML:</strong> For Google Earth or mapping software. <strong>Note:</strong> Limited to 2,000 records per layer for My Maps import.</li>
                     <li><strong className="text-gray-900">JSON:</strong> For a permanent backup in the unified Google format.</li>
                   </ul>
-                  <p><strong>Note</strong>: Newer records from <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">timeline.json</code> don't include the place name. Because all timeline records have a <strong>PlaceId</strong>, you can retrieve the place names by using the Google Maps API and an Apps Script. <a href="https://github.com/BrandonML/google-maps-timeline-converter/tree/main/tools" target="_blank">View the script and instructions on how to use it in the repo</a>.</p>
+                  <p className="mt-4"><strong>Note</strong>: Newer records from <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">timeline.json</code> don't include the place name. Because all timeline records have a <strong>PlaceId</strong>, you can retrieve the place names by using the Google Maps API and an Apps Script. <a href="https://github.com/BrandonML/google-maps-timeline-converter/tree/main/tools" target="_blank" className="text-blue-600 hover:text-blue-800 underline">View the script and instructions on how to use it in the repo</a>.</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -889,7 +889,7 @@ const processFiles = async () => {
                   </button>
                 </div>
 
-                <div className="my-8 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm"><p><strong>Did you find this app useful?</strong> Show your thanks by <a href="https://buymeacoffee.com/scivolette" target="_blank">buying me a beer</a>! Me likey beer 🍺.</p></div>
+                <div className="my-8 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm"><p><strong>Did you find this app useful?</strong> Show your thanks by <a href="https://buymeacoffee.com/scivolette" target="_blank" className="text-blue-600 hover:text-blue-800 underline">buying me a beer</a>! Me likey beer 🍺.</p></div>
               </div>
 
               {/* Next Steps Section (Clean card style) */}
@@ -902,7 +902,7 @@ const processFiles = async () => {
                   <p><strong className="text-gray-900">To create a map in Google My Maps:</strong></p>
                   <ol className="list-decimal list-inside space-y-2 ml-4 marker:text-gray-600">
                     <li>Go to <a href="https://www.google.com/mymaps" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Google My Maps</a>.</li>
-                    <li>Click "Create a new map" then "Import" and upload your CSV or KML file. **Note**: If you have more than 2,000 records you will need to split your data into multiple spreadsheets with each containing 2,00 or fewer records. Then import each as its own layer. Google My Maps allows 10k records per map.</li>
+                    <li>Click "Create a new map" then "Import" and upload your CSV or KML file.</li>
                     <li>Follow the prompts to select <strong className="text-gray-900">Latitude/Longitude</strong> for positioning and <strong className="text-gray-900">Name</strong> for the marker title.</li>
                   </ol>
                   {results.totalCount > 2000 && (
@@ -911,7 +911,7 @@ const processFiles = async () => {
                         <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                         My Maps Limit Warning: {results.totalCount.toLocaleString()} records detected
                       </p>
-                      <p className="mt-2 text-sm">Google My Maps has a <strong>2,000 row limit</strong> per layer. If you have more than 2,000 records you can create additional sheets with each containing 2,000 or fewer records. Then import each one as its own layer.</p>
+                      <p className="mt-2">Google My Maps has a <strong>2,000 row limit</strong> per layer. You can work around this by creating additional sheets with each containing 2,000 or fewer records. Then import each one as its own layer. My Maps allows a maximum of 10k records per map.</p>
                     </div>
                   )}
                 </div>
