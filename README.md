@@ -20,7 +20,7 @@ This app solves these problems by converting, cleaning, and merging your Google 
 - You had multiple Google accounts on your phone and your location data is split across them
 - You want to see your complete travel history on a single map
 - Google's new Timeline format (2024+) isn't compatible with the old format
-- You have thousands of records and need to reduce them to under 2,000 for Google My Maps
+- You have thousands of records and need to reduce them to under 2,000 (per layer) for Google My Maps
 - You want to create a visual record of everywhere you've traveled
 
 **What you can do with the converted data:**
@@ -53,11 +53,12 @@ This app solves these problems by converting, cleaning, and merging your Google 
 
 ### Using the App
 
-1. **Open the Webapp** - Open [the webapp](https://brandonml.github.io/google-maps-timeline-converter/) in your browser
-2. **Upload your files** - Select all your old monthly JSON files AND your new Timeline.json file
-3. **Choose cleaning options** - Keep both options checked to remove duplicates and unnecessary data
-4. **Click "Process Files"** - The app merges and cleans everything
-5. **Download your results** - Get CSV (for Google My Maps), KML (for mapping tools), or JSON (for backup)
+1. **Open the Webapp** - Open [the webapp](https://brandonml.github.io/google-maps-timeline-converter/) in your browser.
+2. **Upload your files** - Select all your old monthly JSON files AND your new `Timeline.json` file.
+3. **Choose cleaning options** - Keep both options checked to remove duplicates and unnecessary data.
+4. **Click "Process Files"** - The app merges and cleans everything.
+5. **Download your results** - Get CSV (for Google My Maps), KML (for mapping tools), or JSON (for backup).
+6. **Getting place names** - Newer records in `timeline.json` don't include the place name. If you want to enhance your timeline data by retrieving the place name, you can use the apps script provided in the `tools` folder. Be sure to review the README in that directory for more information.
 
 ### Privacy Note
 
