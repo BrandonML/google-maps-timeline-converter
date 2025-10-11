@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Download, MapPin, Activity, FileJson, FileText, Map as MapIcon, Info, AlertCircle } from 'lucide-react';
+import { Upload, Download, MapPin, Activity, FileJson, FileText, Map as MapIcon, Info, AlertCircle, ChevronDown } from 'lucide-react';
 
 // --- Interface definitions (unchanged functional code) ---
 interface Location {
@@ -50,6 +50,7 @@ interface Results {
     removedDuplicates: number;
     totalRemoved: number;
   };
+  processingLogs: string[];
 }
 
 export default function App() {
@@ -59,108 +60,161 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [removeActivities, setRemoveActivities] = useState(true);
   const [removeDuplicates, setRemoveDuplicates] = useState(true);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
 
   // Ref added to manage the native file input element
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Functional code for processing (unchanged) ---
-
-  const parseLatLng = (latLngStr?: string): { lat: number; lng: number } => {
-    // FIX: Changed semicolon to comma in the returned object literal.
+const parseLatLng = (latLngStr?: string): { lat: number; lng: number } => {
     if (!latLngStr) return { lat: 0, lng: 0 };
+
+    // Handle "geo:lat,lng" format (iOS/Apple)
+    if (latLngStr.startsWith('geo:')) {
+      const coords = latLngStr.replace('geo:', '').split(',');
+      return { lat: parseFloat(coords[0]), lng: parseFloat(coords[1]) };
+    }
+
+    // Handle "lat°, lng°" format (Android)
     const parts = latLngStr.replace('°', '').split(', ');
-    return {
-      lat: parseFloat(parts[0]),
-      lng: parseFloat(parts[1])
-    };
+    return { lat: parseFloat(parts[0]), lng: parseFloat(parts[1]) };
   };
 
-  const convertNewToOld = (newData: any): { timelineObjects: TimelineObject[] } => {
+const convertNewToOld = (newData: any, filename: string): { timelineObjects: TimelineObject[]; logs: string[] } => {
     const timelineObjects: TimelineObject[] = [];
-    const segments = newData.semanticSegments || [];
+    const logs: string[] = [];
 
-    segments.forEach((segment: any) => {
-      if (segment.visit) {
-        const visit = segment.visit;
-        const topCandidate = visit.topCandidate || {};
-        const placeLocation = topCandidate.placeLocation || {};
-        const { lat, lng } = parseLatLng(placeLocation.latLng);
+    // Check if this is an array (iOS format) or object with semanticSegments (Android format)
+    let segments: any[] = [];
 
-        timelineObjects.push({
-          placeVisit: {
-            location: {
-              latitudeE7: Math.round(lat * 1e7),
-              longitudeE7: Math.round(lng * 1e7),
-              placeId: topCandidate.placeId || '',
-              name: placeLocation.name || '',
-              address: placeLocation.address || '',
-              semanticType: topCandidate.semanticType || 'TYPE_UNKNOWN'
-            },
-            duration: {
-              startTimestamp: segment.startTime,
-              endTimestamp: segment.endTime
-            },
-            centerLatE7: Math.round(lat * 1e7),
-            centerLngE7: Math.round(lng * 1e7),
-            visitConfidence: Math.round((visit.probability || 0) * 100)
+    if (Array.isArray(newData)) {
+      // iOS format - array of segments
+      segments = newData;
+      logs.push(`[${filename}] Detected iOS/Apple format (array of segments)`);
+    } else if (newData.semanticSegments) {
+      // Android format - object with semanticSegments property
+      segments = newData.semanticSegments;
+      logs.push(`[${filename}] Detected Android format (semanticSegments)`);
+    } else {
+      logs.push(`[${filename}] ERROR: Unknown format - no array or semanticSegments found`);
+      return { timelineObjects, logs };
+    }
+
+    logs.push(`[${filename}] Processing ${segments.length} segments`);
+
+    segments.forEach((segment: any, index: number) => {
+      try {
+        if (segment.visit) {
+          const visit = segment.visit;
+          const topCandidate = visit.topCandidate || {};
+
+          // Handle placeLocation which can be a string (geo:lat,lng) or object
+          let lat = 0, lng = 0;
+          if (typeof topCandidate.placeLocation === 'string') {
+            // iOS format: "geo:lat,lng"
+            const coords = parseLatLng(topCandidate.placeLocation);
+            lat = coords.lat;
+            lng = coords.lng;
+          } else if (topCandidate.placeLocation?.latLng) {
+            // Android format: object with latLng property
+            const coords = parseLatLng(topCandidate.placeLocation.latLng);
+            lat = coords.lat;
+            lng = coords.lng;
           }
-        });
-      } else if (segment.activity) {
-        const activity = segment.activity;
-        const startCoords = parseLatLng(activity.start?.latLng);
-        const endCoords = parseLatLng(activity.end?.latLng);
-        const topCandidate = activity.topCandidate || {};
 
-        const activities = topCandidate.type ? [{
-          activityType: topCandidate.type,
-          probability: topCandidate.probability || 0
-        }] : [];
+          timelineObjects.push({
+            placeVisit: {
+              location: {
+                latitudeE7: Math.round(lat * 1e7),
+                longitudeE7: Math.round(lng * 1e7),
+                placeId: topCandidate.placeId || '',
+                name: topCandidate.placeLocation?.name || '',
+                address: topCandidate.placeLocation?.address || '',
+                semanticType: topCandidate.semanticType || 'TYPE_UNKNOWN'
+              },
+              duration: {
+                startTimestamp: segment.startTime || segment.startTimestamp,
+                endTimestamp: segment.endTime || segment.endTimestamp
+              },
+              centerLatE7: Math.round(lat * 1e7),
+              centerLngE7: Math.round(lng * 1e7),
+              visitConfidence: Math.round((parseFloat(visit.probability) || 0) * 100)
+            }
+          });
+        } else if (segment.activity) {
+          const activity = segment.activity;
 
-        timelineObjects.push({
-          activitySegment: {
-            startLocation: {
-              latitudeE7: Math.round(startCoords.lat * 1e7),
-              longitudeE7: Math.round(startCoords.lng * 1e7)
-            },
-            endLocation: {
-              latitudeE7: Math.round(endCoords.lat * 1e7),
-              longitudeE7: Math.round(endCoords.lng * 1e7)
-            },
-            duration: {
-              startTimestamp: segment.startTime,
-              endTimestamp: segment.endTime
-            },
-            distance: activity.distanceMeters || 0,
-            activities: activities
+          // Handle start/end which can be strings (geo:lat,lng) or objects
+          let startCoords = { lat: 0, lng: 0 };
+          let endCoords = { lat: 0, lng: 0 };
+
+          if (typeof activity.start === 'string') {
+            startCoords = parseLatLng(activity.start);
+          } else if (activity.start?.latLng) {
+            startCoords = parseLatLng(activity.start.latLng);
           }
-        });
-      } else if (segment.timelinePath) {
-        const path = segment.timelinePath;
-        if (path.length > 0) {
-          const firstPoint = parseLatLng(path[0].point);
-          const lastPoint = parseLatLng(path[path.length - 1].point);
+
+          if (typeof activity.end === 'string') {
+            endCoords = parseLatLng(activity.end);
+          } else if (activity.end?.latLng) {
+            endCoords = parseLatLng(activity.end.latLng);
+          }
+
+          const topCandidate = activity.topCandidate || {};
+
+          const activities = topCandidate.type ? [{
+            activityType: topCandidate.type,
+            probability: parseFloat(topCandidate.probability) || 0
+          }] : [];
 
           timelineObjects.push({
             activitySegment: {
               startLocation: {
-                latitudeE7: Math.round(firstPoint.lat * 1e7),
-                longitudeE7: Math.round(firstPoint.lng * 1e7)
+                latitudeE7: Math.round(startCoords.lat * 1e7),
+                longitudeE7: Math.round(startCoords.lng * 1e7)
               },
               endLocation: {
-                latitudeE7: Math.round(lastPoint.lat * 1e7),
-                longitudeE7: Math.round(lastPoint.lng * 1e7)
+                latitudeE7: Math.round(endCoords.lat * 1e7),
+                longitudeE7: Math.round(endCoords.lng * 1e7)
               },
               duration: {
-                startTimestamp: segment.startTime,
-                endTimestamp: segment.endTime
-              }
+                startTimestamp: segment.startTime || segment.startTimestamp,
+                endTimestamp: segment.endTime || segment.endTimestamp
+              },
+              distance: parseFloat(activity.distanceMeters) || 0,
+              activities: activities
             }
           });
+        } else if (segment.timelinePath) {
+          const path = segment.timelinePath;
+          if (path.length > 0) {
+            const firstPoint = parseLatLng(path[0].point);
+            const lastPoint = parseLatLng(path[path.length - 1].point);
+
+            timelineObjects.push({
+              activitySegment: {
+                startLocation: {
+                  latitudeE7: Math.round(firstPoint.lat * 1e7),
+                  longitudeE7: Math.round(firstPoint.lng * 1e7)
+                },
+                endLocation: {
+                  latitudeE7: Math.round(lastPoint.lat * 1e7),
+                  longitudeE7: Math.round(lastPoint.lng * 1e7)
+                },
+                duration: {
+                  startTimestamp: segment.startTime || segment.startTimestamp,
+                  endTimestamp: segment.endTime || segment.endTimestamp
+                }
+              }
+            });
+          }
         }
+      } catch (err: any) {
+        logs.push(`[${filename}] ERROR processing segment ${index}: ${err.message}`);
       }
     });
 
-    return { timelineObjects };
+    logs.push(`[${filename}] Successfully converted ${timelineObjects.length} objects`);
+    return { timelineObjects, logs };
   };
 
   const cleanData = (timelineObjects: TimelineObject[]) => {
@@ -374,7 +428,7 @@ End: ${pv.duration.endTimestamp}</description>
     }
   };
 
-  const processFiles = async () => {
+const processFiles = async () => {
     if (files.length === 0) {
       setError('Please upload at least one file');
       return;
@@ -385,26 +439,69 @@ End: ${pv.duration.endTimestamp}</description>
 
     try {
       let combinedTimelineObjects: TimelineObject[] = [];
+      const allLogs: string[] = [];
+      allLogs.push(`=== Processing Started at ${new Date().toISOString()} ===`);
+      allLogs.push(`Total files to process: ${files.length}`);
 
       for (const file of files) {
-        const text = await file.text();
-        const data = JSON.parse(text);
+        try {
+          allLogs.push(`\n--- Processing file: ${file.name} ---`);
+          const text = await file.text();
 
-        if (data.semanticSegments) {
-          const converted = convertNewToOld(data);
-          combinedTimelineObjects = [...combinedTimelineObjects, ...converted.timelineObjects];
-        } else if (data.timelineObjects) {
-          combinedTimelineObjects = [...combinedTimelineObjects, ...data.timelineObjects];
-        } else {
-          throw new Error(`File ${file.name} has unrecognized format`);
+          let data;
+          try {
+            data = JSON.parse(text);
+            allLogs.push(`[${file.name}] Successfully parsed JSON`);
+          } catch (parseErr: any) {
+            allLogs.push(`[${file.name}] ERROR: Failed to parse JSON - ${parseErr.message}`);
+            throw new Error(`Failed to parse ${file.name}: ${parseErr.message}`);
+          }
+
+          // Log the structure of the data
+          if (Array.isArray(data)) {
+            allLogs.push(`[${file.name}] Data is an array with ${data.length} elements`);
+          } else if (typeof data === 'object') {
+            allLogs.push(`[${file.name}] Data is an object with keys: ${Object.keys(data).join(', ')}`);
+          }
+
+          if (Array.isArray(data) || data.semanticSegments) {
+            // New format (Android or iOS)
+            const { timelineObjects, logs } = convertNewToOld(data, file.name);
+            allLogs.push(...logs);
+            combinedTimelineObjects = [...combinedTimelineObjects, ...timelineObjects];
+          } else if (data.timelineObjects) {
+            // Old format
+            allLogs.push(`[${file.name}] Detected old format (timelineObjects)`);
+            allLogs.push(`[${file.name}] Found ${data.timelineObjects.length} timeline objects`);
+            combinedTimelineObjects = [...combinedTimelineObjects, ...data.timelineObjects];
+          } else {
+            const errorMsg = `File ${file.name} has unrecognized format. Expected: array (iOS), semanticSegments (Android), or timelineObjects (old format). Found keys: ${Object.keys(data).join(', ')}`;
+            allLogs.push(`[${file.name}] ERROR: ${errorMsg}`);
+            throw new Error(errorMsg);
+          }
+        } catch (fileErr: any) {
+          allLogs.push(`[${file.name}] FATAL ERROR: ${fileErr.message}`);
+          throw fileErr;
         }
       }
 
+      allLogs.push(`\n=== Combined ${combinedTimelineObjects.length} total timeline objects ===`);
+
       const { cleaned, stats } = cleanData(combinedTimelineObjects);
+      allLogs.push(`\n=== Data Cleaning Complete ===`);
+      allLogs.push(`Removed ${stats.removedActivities} activity segments`);
+      allLogs.push(`Removed ${stats.removedDuplicates} duplicate visits`);
+      allLogs.push(`Final record count: ${cleaned.length}`);
+
       const finalData = { timelineObjects: cleaned };
 
       const csv = convertToCSV(finalData);
       const kml = convertToKML(finalData);
+
+      allLogs.push(`\n=== Conversion Complete ===`);
+      allLogs.push(`Generated CSV with ${csv.split('\n').length - 1} rows`);
+      allLogs.push(`Generated KML with placemark data`);
+      allLogs.push(`Processing completed at ${new Date().toISOString()}`);
 
       setResults({
         oldFormatJson: JSON.stringify(finalData, null, 2),
@@ -414,10 +511,13 @@ End: ${pv.duration.endTimestamp}</description>
         activityCount: cleaned.filter(o => o.activitySegment).length,
         totalCount: cleaned.length,
         originalCount: combinedTimelineObjects.length,
-        cleaningStats: stats
+        cleaningStats: stats,
+        processingLogs: allLogs
       });
     } catch (err: any) {
-      setError(`Error processing files: ${err.message}`);
+      const errorMsg = `Error processing files: ${err.message}`;
+      setError(errorMsg);
+      console.error('Processing error:', err);
     } finally {
       setProcessing(false);
     }
@@ -817,6 +917,41 @@ End: ${pv.duration.endTimestamp}</description>
                   )}
                 </div>
               </div>
+              {/* Processing Logs Section */}
+              <div className="p-6 bg-gray-800 rounded-2xl shadow-lg">
+                <button onClick={() => setIsLogsOpen(!isLogsOpen)} className="w-full flex justify-between items-center">
+                  <h3 className="font-bold text-gray-100 text-xl flex items-center gap-2">
+                    <FileText className="w-6 h-6 text-blue-400" />
+                    Processing Logs
+                  </h3>
+                  <ChevronDown className={`w-6 h-6 text-gray-400 transition-transform ${isLogsOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {isLogsOpen && (
+                  <div className="mt-4">
+                    <p className="text-sm text-gray-300 mb-4">
+                      Detailed information about how your files were processed. If you encounter any issues,
+                      please download these logs and share them for troubleshooting.
+                    </p>
+
+                    <div className="bg-gray-900 rounded-xl p-4 max-h-96 overflow-y-auto font-mono text-xs text-green-400 mb-4">
+                      {results.processingLogs.map((log, i) => (
+                        <div key={i} className={`py-1 ${log.includes('ERROR') ? 'text-red-400 font-bold' : log.includes('===') ? 'text-yellow-400 font-bold' : ''}`}>
+                          {log}
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => downloadFile(results.processingLogs.join('\n'), 'processing_logs.txt', 'text/plain')}
+                      className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-xl transition-colors font-semibold text-sm shadow-lg flex items-center justify-center gap-2"
+                    >
+                      <Download className="w-5 h-5" />
+                      Download Processing Logs
+                    </button>
+                  </div>
+                )}
+              </div>
+
             </div>
           )}
         </div>
