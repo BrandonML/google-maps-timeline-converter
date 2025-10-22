@@ -355,6 +355,19 @@ export default function App() {
     return rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
   };
 
+  const escapeXml = (unsafe: string): string => {
+    return unsafe.replace(/[<>&"']/g, (c: string) => {
+      switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case '"': return '&quot;';
+        case "'": return '&apos;';
+      }
+      return c;
+    });
+  };
+
   const convertToKML = (data: TimelineObject[]): string => {
     let kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -376,14 +389,14 @@ export default function App() {
         const loc = pv.location;
         const lat = loc.latitudeE7 / 1e7;
         const lng = loc.longitudeE7 / 1e7;
-        const name = loc.name || 'Unknown Location';
+        const name = escapeXml(loc.name || 'Unknown Location');
         const address = loc.address || '';
 
         kml += `    <Placemark>
       <name>${name}</name>
-      <description>${address}
+      <description><![CDATA[${address}
 Start: ${pv.duration.startTimestamp}
-End: ${pv.duration.endTimestamp}</description>
+End: ${pv.duration.endTimestamp}]]></description>
       <styleUrl>#visit</styleUrl>
       <Point>
         <coordinates>${lng},${lat},0</coordinates>
