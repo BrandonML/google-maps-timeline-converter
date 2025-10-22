@@ -1,7 +1,10 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Download, MapPin, Activity, FileJson, FileText, Map as MapIcon, Info, AlertCircle, ChevronDown } from 'lucide-react';
+import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown } from 'lucide-react';
 
-// --- Interface definitions (unchanged functional code) ---
+// Add JSZip type declaration for browser usage
+declare const JSZip: any;
+
+// --- Interface definitions ---
 interface Location {
   latitudeE7: number;
   longitudeE7: number;
@@ -39,8 +42,8 @@ interface TimelineObject {
 
 interface Results {
   oldFormatJson: string;
-  csv: string;
-  kml: string;
+  csv: string[];
+  kml: string[];
   visitCount: number;
   activityCount: number;
   totalCount: number;
@@ -60,38 +63,34 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [removeActivities, setRemoveActivities] = useState(true);
   const [removeDuplicates, setRemoveDuplicates] = useState(true);
+  const [splitFiles, setSplitFiles] = useState(true);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isLoadingJSZip, setIsLoadingJSZip] = useState(false);
 
-  // Ref added to manage the native file input element
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-const parseLatLng = (latLngStr?: string): { lat: number; lng: number } => {
+  const parseLatLng = (latLngStr?: string): { lat: number; lng: number } => {
     if (!latLngStr) return { lat: 0, lng: 0 };
 
-    // Handle "geo:lat,lng" format (iOS/Apple)
     if (latLngStr.startsWith('geo:')) {
       const coords = latLngStr.replace('geo:', '').split(',');
       return { lat: parseFloat(coords[0]), lng: parseFloat(coords[1]) };
     }
 
-    // Handle "lat°, lng°" format (Android)
     const parts = latLngStr.replace('°', '').split(', ');
     return { lat: parseFloat(parts[0]), lng: parseFloat(parts[1]) };
   };
 
-const convertNewToOld = (newData: any, filename: string): { timelineObjects: TimelineObject[]; logs: string[] } => {
+  const convertNewToOld = (newData: any, filename: string): { timelineObjects: TimelineObject[]; logs: string[] } => {
     const timelineObjects: TimelineObject[] = [];
     const logs: string[] = [];
 
-    // Check if this is an array (iOS format) or object with semanticSegments (Android format)
     let segments: any[] = [];
 
     if (Array.isArray(newData)) {
-      // iOS format - array of segments
       segments = newData;
       logs.push(`[${filename}] Detected iOS/Apple format (array of segments)`);
     } else if (newData.semanticSegments) {
-      // Android format - object with semanticSegments property
       segments = newData.semanticSegments;
       logs.push(`[${filename}] Detected Android format (semanticSegments)`);
     } else {
@@ -107,15 +106,12 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
           const visit = segment.visit;
           const topCandidate = visit.topCandidate || {};
 
-          // Handle placeLocation which can be a string (geo:lat,lng) or object
           let lat = 0, lng = 0;
           if (typeof topCandidate.placeLocation === 'string') {
-            // iOS format: "geo:lat,lng"
             const coords = parseLatLng(topCandidate.placeLocation);
             lat = coords.lat;
             lng = coords.lng;
           } else if (topCandidate.placeLocation?.latLng) {
-            // Android format: object with latLng property
             const coords = parseLatLng(topCandidate.placeLocation.latLng);
             lat = coords.lat;
             lng = coords.lng;
@@ -143,7 +139,6 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
         } else if (segment.activity) {
           const activity = segment.activity;
 
-          // Handle start/end which can be strings (geo:lat,lng) or objects
           let startCoords = { lat: 0, lng: 0 };
           let endCoords = { lat: 0, lng: 0 };
 
@@ -231,7 +226,6 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
     if (removeDuplicates) {
       const beforeCount = cleaned.length;
 
-      // Step 1: Deduplicate by PlaceId first (for records that have one)
       const placeIdMap = new Map<string, TimelineObject[]>();
       const noPlaceIdRecords: TimelineObject[] = [];
 
@@ -254,14 +248,12 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
         }
       });
 
-      // Pick best record for each PlaceId group
       const recordsAfterPlaceIdDedup: TimelineObject[] = [];
 
       placeIdMap.forEach((group) => {
         if (group.length === 1) {
           recordsAfterPlaceIdDedup.push(group[0]);
         } else {
-          // Multiple records with same PlaceId - prioritize those with addresses
           const withAddress = group.filter(obj => {
             const loc = obj.placeVisit?.location;
             return loc?.address && loc.address.trim() !== '';
@@ -275,13 +267,11 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
         }
       });
 
-      // Step 2: Combine all records and deduplicate by LatLng
       const allRecordsAfterPlaceIdDedup = [...recordsAfterPlaceIdDedup, ...noPlaceIdRecords];
       const latLngMap = new Map<string, TimelineObject[]>();
 
       allRecordsAfterPlaceIdDedup.forEach((obj) => {
         if (!obj.placeVisit) {
-          // Keep non-visit records as-is with unique keys
           latLngMap.set(`activity-${Math.random()}`, [obj]);
           return;
         }
@@ -295,14 +285,12 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
         latLngMap.get(latLngKey)!.push(obj);
       });
 
-      // Pick best record for each LatLng group
       const finalRecords: TimelineObject[] = [];
 
       latLngMap.forEach((group) => {
         if (group.length === 1) {
           finalRecords.push(group[0]);
         } else {
-          // Multiple records at same coordinates - prioritize those with addresses
           const withAddress = group.filter(obj => {
             const loc = obj.placeVisit?.location;
             return loc?.address && loc.address.trim() !== '';
@@ -330,11 +318,11 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
     };
   };
 
-  const convertToCSV = (data: { timelineObjects: TimelineObject[] }): string => {
+  const convertToCSV = (data: TimelineObject[]): string => {
     const rows: (string | number)[][] = [];
     rows.push(['Type', 'Name', 'Address', 'Latitude', 'Longitude', 'Start Time', 'End Time', 'PlaceId']);
 
-    data.timelineObjects.forEach((obj) => {
+    data.forEach((obj) => {
       if (obj.placeVisit) {
         const pv = obj.placeVisit;
         const loc = pv.location;
@@ -367,7 +355,20 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
     return rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
   };
 
-  const convertToKML = (data: { timelineObjects: TimelineObject[] }): string => {
+  const escapeXml = (unsafe: string): string => {
+    return unsafe.replace(/[<>&"']/g, (c: string) => {
+      switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case '"': return '&quot;';
+        case "'": return '&apos;';
+      }
+      return c;
+    });
+  };
+
+  const convertToKML = (data: TimelineObject[]): string => {
     let kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
@@ -382,20 +383,20 @@ const convertNewToOld = (newData: any, filename: string): { timelineObjects: Tim
     </Style>
 `;
 
-    data.timelineObjects.forEach((obj) => {
+    data.forEach((obj) => {
       if (obj.placeVisit) {
         const pv = obj.placeVisit;
         const loc = pv.location;
         const lat = loc.latitudeE7 / 1e7;
         const lng = loc.longitudeE7 / 1e7;
-        const name = loc.name || 'Unknown Location';
+        const name = escapeXml(loc.name || 'Unknown Location');
         const address = loc.address || '';
 
         kml += `    <Placemark>
       <name>${name}</name>
-      <description>${address}
+      <description><![CDATA[${address}
 Start: ${pv.duration.startTimestamp}
-End: ${pv.duration.endTimestamp}</description>
+End: ${pv.duration.endTimestamp}]]></description>
       <styleUrl>#visit</styleUrl>
       <Point>
         <coordinates>${lng},${lat},0</coordinates>
@@ -410,6 +411,14 @@ End: ${pv.duration.endTimestamp}</description>
     return kml;
   };
 
+  const splitIntoChunks = (data: TimelineObject[], chunkSize: number = 2000): TimelineObject[][] => {
+    const chunks: TimelineObject[][] = [];
+    for (let i = 0; i < data.length; i += chunkSize) {
+      chunks.push(data.slice(i, i + chunkSize));
+    }
+    return chunks;
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = e.target.files ? Array.from(e.target.files) : [];
     setFiles(prevFiles => [...prevFiles, ...uploadedFiles]);
@@ -422,13 +431,12 @@ End: ${pv.duration.endTimestamp}</description>
     setError(null);
     setResults(null);
 
-    // Fix for the original user request: Reset the native input element's value to clear the visual filename label
     if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      fileInputRef.current.value = '';
     }
   };
 
-const processFiles = async () => {
+  const processFiles = async () => {
     if (files.length === 0) {
       setError('Please upload at least one file');
       return;
@@ -457,7 +465,6 @@ const processFiles = async () => {
             throw new Error(`Failed to parse ${file.name}: ${parseErr.message}`);
           }
 
-          // Log the structure of the data
           if (Array.isArray(data)) {
             allLogs.push(`[${file.name}] Data is an array with ${data.length} elements`);
           } else if (typeof data === 'object') {
@@ -465,12 +472,10 @@ const processFiles = async () => {
           }
 
           if (Array.isArray(data) || data.semanticSegments) {
-            // New format (Android or iOS)
             const { timelineObjects, logs } = convertNewToOld(data, file.name);
             allLogs.push(...logs);
             combinedTimelineObjects = [...combinedTimelineObjects, ...timelineObjects];
           } else if (data.timelineObjects) {
-            // Old format
             allLogs.push(`[${file.name}] Detected old format (timelineObjects)`);
             allLogs.push(`[${file.name}] Found ${data.timelineObjects.length} timeline objects`);
             combinedTimelineObjects = [...combinedTimelineObjects, ...data.timelineObjects];
@@ -495,18 +500,33 @@ const processFiles = async () => {
 
       const finalData = { timelineObjects: cleaned };
 
-      const csv = convertToCSV(finalData);
-      const kml = convertToKML(finalData);
+      let csvFiles: string[] = [];
+      let kmlFiles: string[] = [];
+
+      if (splitFiles && cleaned.length > 2000) {
+        allLogs.push(`\n=== Splitting Files (${cleaned.length} records > 2000) ===`);
+        const chunks = splitIntoChunks(cleaned, 2000);
+        allLogs.push(`Created ${chunks.length} file chunks`);
+
+        chunks.forEach((chunk, index) => {
+          allLogs.push(`Chunk ${index + 1}: ${chunk.length} records`);
+          csvFiles.push(convertToCSV(chunk));
+          kmlFiles.push(convertToKML(chunk));
+        });
+      } else {
+        csvFiles.push(convertToCSV(cleaned));
+        kmlFiles.push(convertToKML(cleaned));
+      }
 
       allLogs.push(`\n=== Conversion Complete ===`);
-      allLogs.push(`Generated CSV with ${csv.split('\n').length - 1} rows`);
-      allLogs.push(`Generated KML with placemark data`);
+      allLogs.push(`Generated ${csvFiles.length} CSV file(s)`);
+      allLogs.push(`Generated ${kmlFiles.length} KML file(s)`);
       allLogs.push(`Processing completed at ${new Date().toISOString()}`);
 
       setResults({
         oldFormatJson: JSON.stringify(finalData, null, 2),
-        csv,
-        kml,
+        csv: csvFiles,
+        kml: kmlFiles,
         visitCount: cleaned.filter(o => o.placeVisit).length,
         activityCount: cleaned.filter(o => o.activitySegment).length,
         totalCount: cleaned.length,
@@ -535,7 +555,50 @@ const processFiles = async () => {
     setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
-  // --- JSX / UI Refactor Starts Here ---
+  const loadJSZip = async (): Promise<void> => {
+    if (typeof JSZip !== 'undefined') {
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load JSZip'));
+      document.head.appendChild(script);
+    });
+  };
+
+  const downloadZip = async (files: string[], baseName: string, extension: string) => {
+    setIsLoadingJSZip(true);
+    try {
+      await loadJSZip();
+
+      const zip = new JSZip();
+
+      files.forEach((content, index) => {
+        const filename = files.length === 1
+          ? `${baseName}.${extension}`
+          : `${baseName}_part${index + 1}.${extension}`;
+        zip.file(filename, content);
+      });
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (err) {
+      console.error('Error creating zip:', err);
+      setError('Failed to create zip file. Please try downloading files individually.');
+    } finally {
+      setIsLoadingJSZip(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
@@ -551,7 +614,7 @@ const processFiles = async () => {
             </div>
           </div>
 
-          {/* What This Does Section (Now permanently displayed) */}
+          {/* What This Does Section */}
           <div className="mb-10 p-6 bg-blue-50 rounded-2xl relative shadow-md">
             <h2 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
               <AlertCircle className="w-6 h-6" />
@@ -564,7 +627,6 @@ const processFiles = async () => {
                 This tool unifies <code className="bg-blue-100 px-1 rounded font-mono text-sm">old (.json)</code> and <code className="bg-blue-100 px-1 rounded font-mono text-sm">new (Timeline.json)</code> data into one clean, usable file.
               </p>
 
-              {/* Combined use cases into one list, cleaner design */}
               <div className="p-4 bg-white rounded-xl shadow-inner">
                 <p className="font-semibold mb-3 text-blue-900">Key Benefits:</p>
                 <ul className="space-y-2 ml-6 list-disc text-base marker:text-blue-500">
@@ -576,13 +638,11 @@ const processFiles = async () => {
               </div>
             </div>
           </div>
-          {/* End of permanent info section */}
-
 
           {/* Step-by-Step Instructions */}
           <div className="mb-12 p-8 bg-gray-100 rounded-2xl shadow-inner">
             <h2 className="font-bold text-gray-900 mb-6 text-2xl flex items-center gap-2">
-              <MapIcon className="w-6 h-6" />
+              <MapPin className="w-6 h-6" />
               Your Data Workflow
             </h2>
 
@@ -624,7 +684,6 @@ const processFiles = async () => {
                 </ol>
               </div>
 
-              {/* Privacy Note: simplified design */}
               <div className="p-4 bg-gray-200 rounded-xl mt-4">
                 <p className="font-semibold text-gray-900 flex items-center gap-2">🔒 Privacy Note:</p>
                 <p className="text-sm text-gray-800">All processing happens directly in your browser. Your location data never leaves your device.</p>
@@ -638,7 +697,6 @@ const processFiles = async () => {
               <Upload className="inline w-6 h-6 text-blue-600 mr-1" />
               Upload Your Timeline Files
             </h2>
-            {/* Simplified Tip Box - no border */}
             <div className="mb-4 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm">
               <p><strong>💡 Tip:</strong> You can select multiple files at once, or click "Choose Files" multiple times to add more.</p>
             </div>
@@ -647,7 +705,6 @@ const processFiles = async () => {
               multiple
               accept=".json"
               onChange={handleFileUpload}
-              // Attach ref to the input element (for clearing value)
               ref={fileInputRef}
               className="block w-full text-base text-gray-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer transition-colors"
             />
@@ -674,7 +731,7 @@ const processFiles = async () => {
             )}
           </div>
 
-          {/* Data Cleaning Options (Card style with shadow) */}
+          {/* Data Cleaning Options */}
           <div className="mb-10 p-6 bg-indigo-50/70 rounded-2xl shadow-lg">
             <h3 className="font-bold text-indigo-900 mb-5 text-xl flex items-center gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-indigo-700">
@@ -739,6 +796,36 @@ const processFiles = async () => {
                   <p className="text-sm text-gray-500 mt-1">Cleans up redundant data points at the same spot.</p>
                 </div>
               </div>
+
+              {/* Option 3 - NEW: Split files option */}
+              <div className="flex items-start gap-4 p-3 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                <input
+                  type="checkbox"
+                  id="splitFiles"
+                  checked={splitFiles}
+                  onChange={(e) => setSplitFiles(e.target.checked)}
+                  className="mt-1 w-6 h-6 text-blue-600 rounded-lg border-gray-300 focus:ring-blue-500 cursor-pointer flex-shrink-0"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="splitFiles" className="text-base font-semibold text-gray-900 cursor-pointer">
+                      Split files for Google My Maps import
+                      <span className="text-xs ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Recommended</span>
+                    </label>
+                    <div className="relative group">
+                      <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                        <strong>Purpose:</strong> Automatically splits your data into multiple files if you have more than 2,000 records.
+                        <br/><br/>
+                        <strong>Why?</strong> Google My Maps has a 2,000 record limit per layer. This option creates separate files (each with ≤2,000 records) so you can import them as individual layers.
+                        <br/><br/>
+                        <strong>Example:</strong> 5,875 records → 3 files (2,000 + 2,000 + 1,875)
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">Automatically creates multiple files if you have &gt;2,000 records.</p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -759,7 +846,7 @@ const processFiles = async () => {
             ) : 'Process Files'}
           </button>
 
-          {/* Error Display (Cleaned up alert box) */}
+          {/* Error Display */}
           {error && (
             <div className="mt-6 p-4 bg-red-100 border-l-4 border-red-500 rounded-lg text-red-800 flex items-center gap-2 shadow-md">
               <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
@@ -769,10 +856,10 @@ const processFiles = async () => {
             </div>
           )}
 
-          {/* Results Section (Consolidated and redesigned) */}
+          {/* Results Section */}
           {results && (
             <div className="mt-12 space-y-8">
-              {/* Success Banner - Clean and prominent */}
+              {/* Success Banner */}
               <div className="p-5 bg-emerald-50 border-l-4 border-emerald-500 rounded-xl shadow-md">
                 <h3 className="font-bold text-emerald-900 mb-2 text-xl flex items-center gap-3">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
@@ -781,35 +868,36 @@ const processFiles = async () => {
                   Processing Complete!
                 </h3>
                 <p className="text-base text-emerald-800">Your data has been merged, cleaned, and is ready for download.</p>
+                {results.csv.length > 1 && (
+                  <p className="text-base text-emerald-800 mt-2 font-semibold">
+                    📦 Your data has been split into {results.csv.length} files for easy Google My Maps import.
+                  </p>
+                )}
               </div>
 
-              {/* Consolidated Summary Card (Replaces multiple boxes) */}
+              {/* Consolidated Summary Card */}
               <div className="p-6 bg-gray-100 rounded-2xl shadow-xl border border-gray-200">
                 <h3 className="font-bold text-gray-900 mb-5 text-xl">📊 Unified Data Summary</h3>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                  {/* Original Count */}
                   <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
                     <p className="text-xs font-medium text-gray-500 uppercase">Original</p>
                     <p className="text-2xl font-bold text-blue-700 mt-1">{results.originalCount.toLocaleString()}</p>
                     <p className="text-xs text-gray-500 mt-1">Total Records</p>
                   </div>
 
-                  {/* Final Count */}
                   <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
                     <p className="text-xs font-medium text-gray-500 uppercase">Final</p>
                     <p className="text-2xl font-bold text-green-700 mt-1">{results.totalCount.toLocaleString()}</p>
                     <p className="text-xs text-gray-500 mt-1">Total Records</p>
                   </div>
 
-                  {/* Place Visits (Cleaned) */}
                   <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
                     <p className="text-xs font-medium text-gray-500 uppercase flex items-center justify-center gap-1"><MapPin className="w-3 h-3"/> Visits</p>
                     <p className="text-2xl font-bold text-green-600 mt-1">{results.visitCount.toLocaleString()}</p>
                     <p className="text-xs text-gray-500 mt-1">Place Stops</p>
                   </div>
 
-                  {/* Activity Segments (Cleaned) */}
                   <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
                     <p className="text-xs font-medium text-gray-500 uppercase flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> Activity</p>
                     <p className="text-2xl font-bold text-gray-600 mt-1">{results.activityCount.toLocaleString()}</p>
@@ -817,7 +905,6 @@ const processFiles = async () => {
                   </div>
                 </div>
 
-                {/* Cleaning Summary - Concise representation using badges */}
                 {results.cleaningStats.totalRemoved > 0 && (
                   <div className="mt-6 pt-4 border-t border-gray-200">
                     <h4 className="font-semibold text-gray-700 mb-3 text-lg">🧹 Cleaning Summary</h4>
@@ -841,45 +928,62 @@ const processFiles = async () => {
                 )}
               </div>
 
-              {/* Download Section (Stronger visual separation) */}
+              {/* Download Section */}
               <div className="p-6 bg-blue-600/10 rounded-2xl shadow-lg">
                 <h3 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
                   <Download className="w-6 h-6 text-blue-700" />
                   Download Your Converted Files
                 </h3>
 
-                {/* Which format to choose - clean block */}
                 <div className="mb-6 p-4 bg-white rounded-xl text-base text-gray-800 shadow-md">
                   <p className="font-semibold mb-3 text-gray-900">Which format should you choose?</p>
                   <ul className="space-y-2 ml-6 list-disc marker:text-blue-500">
                     <li><strong className="text-gray-900">CSV:</strong> Best for spreadsheet analysis (Excel, Sheets) and Google My Maps.</li>
-                    <li><strong className="text-gray-900">KML:</strong> For Google Earth or mapping software. <strong>Note:</strong> Limited to 2,000 records per layer for My Maps import.</li>
+                    <li><strong className="text-gray-900">KML:</strong> For Google Earth or mapping software.</li>
                     <li><strong className="text-gray-900">JSON:</strong> For a permanent backup in the unified Google format.</li>
                   </ul>
+                  {results.csv.length > 1 && (
+                    <div className="mt-4 p-3 bg-blue-50 border-l-4 border-blue-500 rounded">
+                      <p className="font-semibold text-blue-900">📦 Multiple Files Generated</p>
+                      <p className="text-sm text-blue-800 mt-1">
+                        Your data has been split into {results.csv.length} files. Each file contains 2,000 or fewer records.
+                        Click the download button to get all files as a zip archive, then import each file as a separate layer in Google My Maps.
+                      </p>
+                    </div>
+                  )}
                   <p className="mt-4"><strong>Note</strong>: Newer records from <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">timeline.json</code> don't include the place name. Because all timeline records have a <strong>PlaceId</strong>, you can retrieve the place names by using the Google Maps API and an Apps Script. <a href="https://github.com/BrandonML/google-maps-timeline-converter/tree/main/tools" target="_blank" className="text-blue-600 hover:text-blue-800 underline">View the script and instructions on how to use it in the repo</a>.</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {/* CSV Button - Primary Focus */}
                   <button
-                    onClick={() => downloadFile(results.csv, 'timeline_converted.csv', 'text/csv')}
-                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white py-4 px-4 rounded-xl transition-colors font-extrabold text-base shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
+                    onClick={() => results.csv.length === 1
+                      ? downloadFile(results.csv[0], 'timeline_converted.csv', 'text/csv')
+                      : downloadZip(results.csv, 'timeline_converted', 'csv')
+                    }
+                    disabled={isLoadingJSZip}
+                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors font-extrabold text-base shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
                   >
                     <FileText className="w-6 h-6" />
                     <div className="text-center sm:text-left">
-                      <div>CSV</div>
+                      <div>CSV {results.csv.length > 1 && `(${results.csv.length} files)`}</div>
                       <div className="text-xs font-normal opacity-90">Recommended</div>
                     </div>
                   </button>
-                  {/* KML Button */}
+
                   <button
-                    onClick={() => downloadFile(results.kml, 'timeline_converted.kml', 'application/vnd.google-earth.kml+xml')}
-                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-[1.02] active:scale-[0.98]"
+                    onClick={() => results.kml.length === 1
+                      ? downloadFile(results.kml[0], 'timeline_converted.kml', 'application/vnd.google-earth.kml+xml')
+                      : downloadZip(results.kml, 'timeline_converted', 'kml')
+                    }
+                    disabled={isLoadingJSZip}
+                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-[1.02] active:scale-[0.98]"
                   >
-                    <MapIcon className="w-6 h-6" />
-                    KML
+                    <MapPin className="w-6 h-6" />
+                    <div className="text-center sm:text-left">
+                      KML {results.kml.length > 1 && `(${results.kml.length} files)`}
+                    </div>
                   </button>
-                  {/* JSON Button */}
+
                   <button
                     onClick={() => downloadFile(results.oldFormatJson, 'timeline_converted.json', 'application/json')}
                     className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-[1.02] active:scale-[0.98]"
@@ -889,13 +993,21 @@ const processFiles = async () => {
                   </button>
                 </div>
 
-                <div className="my-8 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm"><p><strong>Did you find this app useful?</strong> Show your thanks by <a href="https://buymeacoffee.com/scivolette" target="_blank" className="text-blue-600 hover:text-blue-800 underline">buying me a beer</a>! Me likey beer 🍺.</p></div>
+                {isLoadingJSZip && (
+                  <div className="mt-4 p-3 bg-blue-50 rounded-xl text-center text-blue-800">
+                    <p className="text-sm">Loading zip library... This only happens once.</p>
+                  </div>
+                )}
+
+                <div className="my-8 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm">
+                  <p><strong>Did you find this app useful?</strong> Show your thanks by <a href="https://buymeacoffee.com/scivolette" target="_blank" className="text-blue-600 hover:text-blue-800 underline">buying me a beer</a>! Me likey beer 🍺.</p>
+                </div>
               </div>
 
-              {/* Next Steps Section (Clean card style) */}
+              {/* Next Steps Section */}
               <div className="p-6 bg-gray-100 rounded-2xl shadow-inner border border-gray-200">
                 <h3 className="font-bold text-gray-900 mb-4 text-xl flex items-center gap-2">
-                  <MapIcon className="w-6 h-6" />
+                  <MapPin className="w-6 h-6" />
                   Next Steps: Creating Your Map
                 </h3>
                 <div className="text-base text-gray-800 space-y-3 leading-relaxed">
@@ -903,19 +1015,25 @@ const processFiles = async () => {
                   <ol className="list-decimal list-inside space-y-2 ml-4 marker:text-gray-600">
                     <li>Go to <a href="https://www.google.com/mymaps" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Google My Maps</a>.</li>
                     <li>Click "Create a new map" then "Import" and upload your CSV or KML file.</li>
+                    {results.csv.length > 1 && (
+                      <li className="font-semibold text-blue-900">
+                        <strong>Multiple files:</strong> Import each file as a separate layer. After importing the first file, click "Add layer" in the left sidebar, then import the next file. Repeat for all {results.csv.length} files.
+                      </li>
+                    )}
                     <li>Follow the prompts to select <strong className="text-gray-900">Latitude/Longitude</strong> for positioning and <strong className="text-gray-900">Name</strong> for the marker title.</li>
                   </ol>
-                  {results.totalCount > 2000 && (
+                  {results.totalCount > 10000 && (
                     <div className="mt-4 p-4 bg-red-50 border-l-4 border-red-500 rounded text-red-800 shadow-sm">
                       <p className="font-semibold text-red-900 text-base flex items-center gap-2">
                         <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                        My Maps Limit Warning: {results.totalCount.toLocaleString()} records detected
+                        My Maps Total Limit Warning: {results.totalCount.toLocaleString()} records detected
                       </p>
-                      <p className="mt-2">Google My Maps has a <strong>2,000 row limit</strong> per layer. You can work around this by creating additional sheets with each containing 2,000 or fewer records. Then import each one as its own layer. My Maps allows a maximum of 10k records per map.</p>
+                      <p className="mt-2">Google My Maps has a <strong>10,000 record maximum per map</strong>. You have {results.totalCount.toLocaleString()} records. Consider filtering your data further or creating multiple separate maps.</p>
                     </div>
                   )}
                 </div>
               </div>
+
               {/* Processing Logs Section */}
               <div className="p-6 bg-gray-800 rounded-2xl shadow-lg">
                 <button onClick={() => setIsLogsOpen(!isLogsOpen)} className="w-full flex justify-between items-center">
@@ -961,13 +1079,13 @@ const processFiles = async () => {
             Made with ❤️ for travelers, data enthusiasts, and anyone who wants to visualize their journey through life.
           </p>
           <div className="mt-4 text-center text-slate-500">
-                <p>Built by <a href="https://www.facebook.com/scivolette" target="_blank" className="font-semibold text-slate-600 hover:text-blue-600 transition-colors underline">Brandon Scivolette</a></p>
-                <div className="flex justify-center items-center space-x-4 mt-2">
-                    <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" className="hover:text-blue-600 transition-colors underline">GitHub</a>
-                    <span className="text-gray-300">|</span>
-                    <a href="https://linke.ro/brandon" target="_blank" className="hover:text-blue-600 transition-colors underline">Linke</a>
-                </div>
+            <p>Built by <a href="https://www.facebook.com/scivolette" target="_blank" className="font-semibold text-slate-600 hover:text-blue-600 transition-colors underline">Brandon Scivolette</a></p>
+            <div className="flex justify-center items-center space-x-4 mt-2">
+              <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" className="hover:text-blue-600 transition-colors underline">GitHub</a>
+              <span className="text-gray-300">|</span>
+              <a href="https://linke.ro/brandon" target="_blank" className="hover:text-blue-600 transition-colors underline">Linke</a>
             </div>
+          </div>
         </div>
       </div>
     </div>
