@@ -569,7 +569,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     });
   };
 
-  const downloadZip = async (files: string[], baseName: string, extension: string, mimeType: string) => {
+  const downloadZip = async (files: string[], baseName: string, extension: string) => {
     setIsLoadingJSZip(true);
     try {
       await loadJSZip();
@@ -958,7 +958,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                   <button
                     onClick={() => results.csv.length === 1
                       ? downloadFile(results.csv[0], 'timeline_converted.csv', 'text/csv')
-                      : downloadZip(results.csv, 'timeline_converted', 'csv', 'text/csv')
+                      : downloadZip(results.csv, 'timeline_converted', 'csv')
                     }
                     disabled={isLoadingJSZip}
                     className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors font-extrabold text-base shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
@@ -973,7 +973,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                   <button
                     onClick={() => results.kml.length === 1
                       ? downloadFile(results.kml[0], 'timeline_converted.kml', 'application/vnd.google-earth.kml+xml')
-                      : downloadZip(results.kml, 'timeline_converted', 'kml', 'application/vnd.google-earth.kml+xml')
+                      : downloadZip(results.kml, 'timeline_converted', 'kml')
                     }
                     disabled={isLoadingJSZip}
                     className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-[1.02] active:scale-[0.98]"
