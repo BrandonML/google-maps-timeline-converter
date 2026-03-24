@@ -270,9 +270,10 @@ export default function App() {
       const allRecordsAfterPlaceIdDedup = [...recordsAfterPlaceIdDedup, ...noPlaceIdRecords];
       const latLngMap = new Map<string, TimelineObject[]>();
 
+      let activityCounter = 0;
       allRecordsAfterPlaceIdDedup.forEach((obj) => {
         if (!obj.placeVisit) {
-          latLngMap.set(`activity-${Math.random()}`, [obj]);
+          latLngMap.set(`activity-${activityCounter++}`, [obj]);
           return;
         }
 
