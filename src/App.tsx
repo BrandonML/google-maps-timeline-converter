@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown } from 'lucide-react';
 
 // Add JSZip type declaration for browser usage
-declare const JSZip: any;
+declare const JSZip: unknown;
 
 // --- Interface definitions ---
 interface Location {
@@ -81,17 +81,22 @@ export default function App() {
     return { lat: parseFloat(parts[0]), lng: parseFloat(parts[1]) };
   };
 
-  const convertNewToOld = (newData: any, filename: string): { timelineObjects: TimelineObject[]; logs: string[] } => {
+  const getErrorMessage = (err: unknown): string => {
+    if (err instanceof Error) return err.message;
+    return String(err);
+  };
+
+  const convertNewToOld = (newData: unknown, filename: string): { timelineObjects: TimelineObject[]; logs: string[] } => {
     const timelineObjects: TimelineObject[] = [];
     const logs: string[] = [];
 
-    let segments: any[] = [];
+    let segments: unknown[] = [];
 
     if (Array.isArray(newData)) {
       segments = newData;
       logs.push(`[${filename}] Detected iOS/Apple format (array of segments)`);
-    } else if (newData.semanticSegments) {
-      segments = newData.semanticSegments;
+    } else if (newData && typeof newData === 'object' && 'semanticSegments' in newData && Array.isArray((newData as { semanticSegments: unknown }).semanticSegments)) {
+      segments = (newData as { semanticSegments: unknown[] }).semanticSegments;
       logs.push(`[${filename}] Detected Android format (semanticSegments)`);
     } else {
       logs.push(`[${filename}] ERROR: Unknown format - no array or semanticSegments found`);
@@ -100,19 +105,22 @@ export default function App() {
 
     logs.push(`[${filename}] Processing ${segments.length} segments`);
 
-    segments.forEach((segment: any, index: number) => {
+    segments.forEach((segmentRaw: unknown, index: number) => {
       try {
-        if (segment.visit) {
-          const visit = segment.visit;
-          const topCandidate = visit.topCandidate || {};
+        const segment = segmentRaw as Record<string, unknown>;
+        if (segment && typeof segment === 'object' && segment.visit) {
+          const visit = segment.visit as Record<string, unknown>;
+          const topCandidate = (visit.topCandidate as Record<string, unknown>) || {};
 
           let lat = 0, lng = 0;
-          if (typeof topCandidate.placeLocation === 'string') {
-            const coords = parseLatLng(topCandidate.placeLocation);
+          const placeLocation = topCandidate.placeLocation as Record<string, unknown> | string | undefined;
+
+          if (typeof placeLocation === 'string') {
+            const coords = parseLatLng(placeLocation);
             lat = coords.lat;
             lng = coords.lng;
-          } else if (topCandidate.placeLocation?.latLng) {
-            const coords = parseLatLng(topCandidate.placeLocation.latLng);
+          } else if (placeLocation && (placeLocation as Record<string, string>).latLng) {
+            const coords = parseLatLng((placeLocation as Record<string, string>).latLng);
             lat = coords.lat;
             lng = coords.lng;
           }
@@ -122,43 +130,46 @@ export default function App() {
               location: {
                 latitudeE7: Math.round(lat * 1e7),
                 longitudeE7: Math.round(lng * 1e7),
-                placeId: topCandidate.placeId || '',
-                name: topCandidate.placeLocation?.name || '',
-                address: topCandidate.placeLocation?.address || '',
-                semanticType: topCandidate.semanticType || 'TYPE_UNKNOWN'
+                placeId: (topCandidate.placeId as string) || '',
+                name: (placeLocation && typeof placeLocation === 'object' ? (placeLocation as Record<string, string>).name : undefined) || '',
+                address: (placeLocation && typeof placeLocation === 'object' ? (placeLocation as Record<string, string>).address : undefined) || '',
+                semanticType: (topCandidate.semanticType as string) || 'TYPE_UNKNOWN'
               },
               duration: {
-                startTimestamp: segment.startTime || segment.startTimestamp,
-                endTimestamp: segment.endTime || segment.endTimestamp
+                startTimestamp: (segment.startTime as string) || (segment.startTimestamp as string),
+                endTimestamp: (segment.endTime as string) || (segment.endTimestamp as string)
               },
               centerLatE7: Math.round(lat * 1e7),
               centerLngE7: Math.round(lng * 1e7),
-              visitConfidence: Math.round((parseFloat(visit.probability) || 0) * 100)
+              visitConfidence: Math.round((parseFloat(visit.probability as string) || 0) * 100)
             }
           });
-        } else if (segment.activity) {
-          const activity = segment.activity;
+        } else if (segment && typeof segment === 'object' && segment.activity) {
+          const activity = segment.activity as Record<string, unknown>;
 
           let startCoords = { lat: 0, lng: 0 };
           let endCoords = { lat: 0, lng: 0 };
 
-          if (typeof activity.start === 'string') {
-            startCoords = parseLatLng(activity.start);
-          } else if (activity.start?.latLng) {
-            startCoords = parseLatLng(activity.start.latLng);
+          const startData = activity.start as Record<string, string> | string | undefined;
+          const endData = activity.end as Record<string, string> | string | undefined;
+
+          if (typeof startData === 'string') {
+            startCoords = parseLatLng(startData);
+          } else if (startData && startData.latLng) {
+            startCoords = parseLatLng(startData.latLng);
           }
 
-          if (typeof activity.end === 'string') {
-            endCoords = parseLatLng(activity.end);
-          } else if (activity.end?.latLng) {
-            endCoords = parseLatLng(activity.end.latLng);
+          if (typeof endData === 'string') {
+            endCoords = parseLatLng(endData);
+          } else if (endData && endData.latLng) {
+            endCoords = parseLatLng(endData.latLng);
           }
 
-          const topCandidate = activity.topCandidate || {};
+          const topCandidate = (activity.topCandidate as Record<string, unknown>) || {};
 
           const activities = topCandidate.type ? [{
-            activityType: topCandidate.type,
-            probability: parseFloat(topCandidate.probability) || 0
+            activityType: topCandidate.type as string,
+            probability: parseFloat(topCandidate.probability as string) || 0
           }] : [];
 
           timelineObjects.push({
@@ -172,16 +183,16 @@ export default function App() {
                 longitudeE7: Math.round(endCoords.lng * 1e7)
               },
               duration: {
-                startTimestamp: segment.startTime || segment.startTimestamp,
-                endTimestamp: segment.endTime || segment.endTimestamp
+                startTimestamp: (segment.startTime as string) || (segment.startTimestamp as string),
+                endTimestamp: (segment.endTime as string) || (segment.endTimestamp as string)
               },
-              distance: parseFloat(activity.distanceMeters) || 0,
+              distance: parseFloat(activity.distanceMeters as string) || 0,
               activities: activities
             }
           });
-        } else if (segment.timelinePath) {
-          const path = segment.timelinePath;
-          if (path.length > 0) {
+        } else if (segment && typeof segment === 'object' && segment.timelinePath) {
+          const path = segment.timelinePath as Array<{point: string}>;
+          if (Array.isArray(path) && path.length > 0) {
             const firstPoint = parseLatLng(path[0].point);
             const lastPoint = parseLatLng(path[path.length - 1].point);
 
@@ -196,15 +207,15 @@ export default function App() {
                   longitudeE7: Math.round(lastPoint.lng * 1e7)
                 },
                 duration: {
-                  startTimestamp: segment.startTime || segment.startTimestamp,
-                  endTimestamp: segment.endTime || segment.endTimestamp
+                  startTimestamp: (segment.startTime as string) || (segment.startTimestamp as string),
+                  endTimestamp: (segment.endTime as string) || (segment.endTimestamp as string)
                 }
               }
             });
           }
         }
-      } catch (err: any) {
-        logs.push(`[${filename}] ERROR processing segment ${index}: ${err.message}`);
+      } catch (err: unknown) {
+        logs.push(`[${filename}] ERROR processing segment ${index}: ${getErrorMessage(err)}`);
       }
     });
 
@@ -457,36 +468,38 @@ End: ${pv.duration.endTimestamp}]]></description>
           allLogs.push(`\n--- Processing file: ${file.name} ---`);
           const text = await file.text();
 
-          let data;
+          let data: unknown;
           try {
             data = JSON.parse(text);
             allLogs.push(`[${file.name}] Successfully parsed JSON`);
-          } catch (parseErr: any) {
-            allLogs.push(`[${file.name}] ERROR: Failed to parse JSON - ${parseErr.message}`);
-            throw new Error(`Failed to parse ${file.name}: ${parseErr.message}`);
+          } catch (parseErr: unknown) {
+            allLogs.push(`[${file.name}] ERROR: Failed to parse JSON - ${getErrorMessage(parseErr)}`);
+            throw new Error(`Failed to parse ${file.name}: ${getErrorMessage(parseErr)}`);
           }
 
           if (Array.isArray(data)) {
             allLogs.push(`[${file.name}] Data is an array with ${data.length} elements`);
-          } else if (typeof data === 'object') {
+          } else if (data && typeof data === 'object') {
             allLogs.push(`[${file.name}] Data is an object with keys: ${Object.keys(data).join(', ')}`);
           }
 
-          if (Array.isArray(data) || data.semanticSegments) {
+          if (Array.isArray(data) || (data && typeof data === 'object' && 'semanticSegments' in data)) {
             const { timelineObjects, logs } = convertNewToOld(data, file.name);
             allLogs.push(...logs);
             combinedTimelineObjects = [...combinedTimelineObjects, ...timelineObjects];
-          } else if (data.timelineObjects) {
+          } else if (data && typeof data === 'object' && 'timelineObjects' in data && Array.isArray((data as { timelineObjects: unknown }).timelineObjects)) {
             allLogs.push(`[${file.name}] Detected old format (timelineObjects)`);
-            allLogs.push(`[${file.name}] Found ${data.timelineObjects.length} timeline objects`);
-            combinedTimelineObjects = [...combinedTimelineObjects, ...data.timelineObjects];
+            const objects = (data as { timelineObjects: TimelineObject[] }).timelineObjects;
+            allLogs.push(`[${file.name}] Found ${objects.length} timeline objects`);
+            combinedTimelineObjects = [...combinedTimelineObjects, ...objects];
           } else {
-            const errorMsg = `File ${file.name} has unrecognized format. Expected: array (iOS), semanticSegments (Android), or timelineObjects (old format). Found keys: ${Object.keys(data).join(', ')}`;
+            const keys = data && typeof data === 'object' ? Object.keys(data).join(', ') : 'not an object';
+            const errorMsg = `File ${file.name} has unrecognized format. Expected: array (iOS), semanticSegments (Android), or timelineObjects (old format). Found keys: ${keys}`;
             allLogs.push(`[${file.name}] ERROR: ${errorMsg}`);
             throw new Error(errorMsg);
           }
-        } catch (fileErr: any) {
-          allLogs.push(`[${file.name}] FATAL ERROR: ${fileErr.message}`);
+        } catch (fileErr: unknown) {
+          allLogs.push(`[${file.name}] FATAL ERROR: ${getErrorMessage(fileErr)}`);
           throw fileErr;
         }
       }
@@ -501,8 +514,8 @@ End: ${pv.duration.endTimestamp}]]></description>
 
       const finalData = { timelineObjects: cleaned };
 
-      let csvFiles: string[] = [];
-      let kmlFiles: string[] = [];
+      const csvFiles: string[] = [];
+      const kmlFiles: string[] = [];
 
       if (splitFiles && cleaned.length > 2000) {
         allLogs.push(`\n=== Splitting Files (${cleaned.length} records > 2000) ===`);
@@ -535,8 +548,8 @@ End: ${pv.duration.endTimestamp}]]></description>
         cleaningStats: stats,
         processingLogs: allLogs
       });
-    } catch (err: any) {
-      const errorMsg = `Error processing files: ${err.message}`;
+    } catch (err: unknown) {
+      const errorMsg = `Error processing files: ${getErrorMessage(err)}`;
       setError(errorMsg);
       console.error('Processing error:', err);
     } finally {
@@ -575,6 +588,8 @@ End: ${pv.duration.endTimestamp}]]></description>
     try {
       await loadJSZip();
 
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
       const zip = new JSZip();
 
       files.forEach((content, index) => {
