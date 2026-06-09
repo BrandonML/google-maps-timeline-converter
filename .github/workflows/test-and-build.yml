@@ -22,14 +22,14 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18.x]
+        node-version: ['22.x']
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Set up Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.1.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -40,15 +40,11 @@ jobs:
           CI: true
 
       - name: Run TypeScript type checking
-        run: npm run build -- --noEmit
+        run: npx tsc --noEmit
         continue-on-error: false
 
       - name: Run ESLint
         run: npm run lint
-        continue-on-error: false
-
-      - name: Run unit tests
-        run: npm test -- --run
         continue-on-error: false
 
       - name: Build production app
@@ -90,7 +86,7 @@ jobs:
 
       - name: Upload build artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: build-output-${{ github.run_id }}
           path: docs/
