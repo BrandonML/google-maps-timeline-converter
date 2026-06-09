@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# 1. Run the build
+npm run build
+
+# 2. Automatically stage the freshly built docs folder
+git add docs/
