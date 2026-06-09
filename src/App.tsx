@@ -258,7 +258,7 @@ export default function App() {
     return { timelineObjects, logs };
   };
 
-  const cleanData = (timelineObjects: TimelineObject[]): CleanDataResult => {
+const cleanData = (timelineObjects: TimelineObject[]): CleanDataResult => {
     let cleaned = [...timelineObjects];
     let removedActivities = 0;
     let removedDuplicates = 0;
@@ -272,6 +272,18 @@ export default function App() {
     if (removeDuplicates) {
       const beforeCount = cleaned.length;
 
+      // Helper to score records: Name is most valuable, Address is second.
+      const getRecordScore = (obj: TimelineObject): number => {
+        const loc = obj.placeVisit?.location;
+        if (!loc) return 0;
+        
+        let score = 0;
+        if (loc.name && loc.name.trim() !== '') score += 2;
+        if (loc.address && loc.address.trim() !== '') score += 1;
+        return score;
+      };
+
+      // Step 1: Deduplicate by PlaceId
       const placeIdMap = new Map<string, TimelineObject[]>();
       const noPlaceIdRecords: TimelineObject[] = [];
 
@@ -300,19 +312,13 @@ export default function App() {
         if (group.length === 1) {
           recordsAfterPlaceIdDedup.push(group[0]);
         } else {
-          const withAddress = group.filter(obj => {
-            const loc = obj.placeVisit?.location;
-            return loc?.address && loc.address.trim() !== '';
-          });
-
-          if (withAddress.length > 0) {
-            recordsAfterPlaceIdDedup.push(withAddress[0]);
-          } else {
-            recordsAfterPlaceIdDedup.push(group[0]);
-          }
+          // Sort descending by score and grab the winner
+          const sortedGroup = [...group].sort((a, b) => getRecordScore(b) - getRecordScore(a));
+          recordsAfterPlaceIdDedup.push(sortedGroup[0]);
         }
       });
 
+      // Step 2: Deduplicate by Coordinates
       const allRecordsAfterPlaceIdDedup = [...recordsAfterPlaceIdDedup, ...noPlaceIdRecords];
       const latLngMap = new Map<string, TimelineObject[]>();
 
@@ -338,16 +344,9 @@ export default function App() {
         if (group.length === 1) {
           finalRecords.push(group[0]);
         } else {
-          const withAddress = group.filter(obj => {
-            const loc = obj.placeVisit?.location;
-            return loc?.address && loc.address.trim() !== '';
-          });
-
-          if (withAddress.length > 0) {
-            finalRecords.push(withAddress[0]);
-          } else {
-            finalRecords.push(group[0]);
-          }
+          // Sort descending by score and grab the winner
+          const sortedGroup = [...group].sort((a, b) => getRecordScore(b) - getRecordScore(a));
+          finalRecords.push(sortedGroup[0]);
         }
       });
 
