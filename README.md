@@ -47,7 +47,7 @@ This app solves these problems by converting, cleaning, and merging your Google 
 
 **For NEW format data (2024+):**
 
-1. On your Android device: **Settings → Location → Timeline → Export**
+1. On your Android device: **Settings → Location → Location Services → Timeline → Export Timeline Data**
 2. This creates a `Timeline.json` file with all your recent data
 3. Transfer this file to your computer
 
