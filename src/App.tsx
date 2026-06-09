@@ -721,7 +721,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                   This data is only on your phone — not in Google Takeout!
                 </p>
                 <ol className="list-decimal list-inside space-y-2 ml-10">
-                  <li>On your phone: <strong className="text-gray-900">Settings → Location → Timeline → Export data.</strong></li>
+                  <li>On your phone: <strong className="text-gray-900">Settings → Location → Location Services→ Timeline → Export Timeline Data.</strong></li>
                   <li>Transfer the generated <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">Timeline.json</code> file to your computer.</li>
                 </ol>
               </div>
