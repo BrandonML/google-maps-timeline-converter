@@ -2,7 +2,14 @@ import React, { useState, useRef } from 'react';
 import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown } from 'lucide-react';
 
 // Add JSZip type declaration for browser usage
-declare const JSZip: any;
+declare const JSZip: {
+  new(): JSZipInstance;
+};
+
+interface JSZipInstance {
+  file(name: string, content: string): void;
+  generateAsync(options: { type: 'blob' }): Promise<Blob>;
+}
 
 // --- Interface definitions ---
 interface Location {
@@ -56,6 +63,29 @@ interface Results {
   processingLogs: string[];
 }
 
+interface ConversionResult {
+  timelineObjects: TimelineObject[];
+  logs: string[];
+}
+
+interface CleanDataResult {
+  cleaned: TimelineObject[];
+  stats: {
+    removedActivities: number;
+    removedDuplicates: number;
+    totalRemoved: number;
+  };
+}
+
+interface NewFormatData {
+  [key: string]: unknown;
+  semanticSegments?: unknown[];
+}
+
+interface OldFormatData {
+  timelineObjects?: TimelineObject[];
+}
+
 export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
@@ -81,11 +111,11 @@ export default function App() {
     return { lat: parseFloat(parts[0]), lng: parseFloat(parts[1]) };
   };
 
-  const convertNewToOld = (newData: any, filename: string): { timelineObjects: TimelineObject[]; logs: string[] } => {
+  const convertNewToOld = (newData: NewFormatData, filename: string): ConversionResult => {
     const timelineObjects: TimelineObject[] = [];
     const logs: string[] = [];
 
-    let segments: any[] = [];
+    let segments: unknown[] = [];
 
     if (Array.isArray(newData)) {
       segments = newData;
@@ -100,21 +130,26 @@ export default function App() {
 
     logs.push(`[${filename}] Processing ${segments.length} segments`);
 
-    segments.forEach((segment: any, index: number) => {
+    segments.forEach((segment: unknown, index: number) => {
       try {
-        if (segment.visit) {
-          const visit = segment.visit;
-          const topCandidate = visit.topCandidate || {};
+        const seg = segment as Record<string, unknown>;
+        
+        if (seg.visit) {
+          const visit = seg.visit as Record<string, unknown>;
+          const topCandidate = (visit.topCandidate || {}) as Record<string, unknown>;
 
           let lat = 0, lng = 0;
           if (typeof topCandidate.placeLocation === 'string') {
             const coords = parseLatLng(topCandidate.placeLocation);
             lat = coords.lat;
             lng = coords.lng;
-          } else if (topCandidate.placeLocation?.latLng) {
-            const coords = parseLatLng(topCandidate.placeLocation.latLng);
-            lat = coords.lat;
-            lng = coords.lng;
+          } else if (topCandidate.placeLocation && typeof topCandidate.placeLocation === 'object') {
+            const placeLocation = topCandidate.placeLocation as Record<string, unknown>;
+            if (typeof placeLocation.latLng === 'string') {
+              const coords = parseLatLng(placeLocation.latLng);
+              lat = coords.lat;
+              lng = coords.lng;
+            }
           }
 
           timelineObjects.push({
@@ -122,43 +157,53 @@ export default function App() {
               location: {
                 latitudeE7: Math.round(lat * 1e7),
                 longitudeE7: Math.round(lng * 1e7),
-                placeId: topCandidate.placeId || '',
-                name: topCandidate.placeLocation?.name || '',
-                address: topCandidate.placeLocation?.address || '',
-                semanticType: topCandidate.semanticType || 'TYPE_UNKNOWN'
+                placeId: (topCandidate.placeId as string) || '',
+                name: (topCandidate.placeLocation && typeof topCandidate.placeLocation === 'object' 
+                  ? (topCandidate.placeLocation as Record<string, unknown>).name 
+                  : '') as string || '',
+                address: (topCandidate.placeLocation && typeof topCandidate.placeLocation === 'object'
+                  ? (topCandidate.placeLocation as Record<string, unknown>).address
+                  : '') as string || '',
+                semanticType: (topCandidate.semanticType as string) || 'TYPE_UNKNOWN'
               },
               duration: {
-                startTimestamp: segment.startTime || segment.startTimestamp,
-                endTimestamp: segment.endTime || segment.endTimestamp
+                startTimestamp: (seg.startTime || seg.startTimestamp) as string,
+                endTimestamp: (seg.endTime || seg.endTimestamp) as string
               },
               centerLatE7: Math.round(lat * 1e7),
               centerLngE7: Math.round(lng * 1e7),
-              visitConfidence: Math.round((parseFloat(visit.probability) || 0) * 100)
+              visitConfidence: Math.round((parseFloat((visit.probability as string) || '0') || 0) * 100)
             }
           });
-        } else if (segment.activity) {
-          const activity = segment.activity;
+        } else if (seg.activity) {
+          const activity = seg.activity as Record<string, unknown>;
 
           let startCoords = { lat: 0, lng: 0 };
           let endCoords = { lat: 0, lng: 0 };
 
           if (typeof activity.start === 'string') {
             startCoords = parseLatLng(activity.start);
-          } else if (activity.start?.latLng) {
-            startCoords = parseLatLng(activity.start.latLng);
+          } else if (activity.start && typeof activity.start === 'object') {
+            const start = activity.start as Record<string, unknown>;
+            if (typeof start.latLng === 'string') {
+              startCoords = parseLatLng(start.latLng);
+            }
           }
 
           if (typeof activity.end === 'string') {
             endCoords = parseLatLng(activity.end);
-          } else if (activity.end?.latLng) {
-            endCoords = parseLatLng(activity.end.latLng);
+          } else if (activity.end && typeof activity.end === 'object') {
+            const end = activity.end as Record<string, unknown>;
+            if (typeof end.latLng === 'string') {
+              endCoords = parseLatLng(end.latLng);
+            }
           }
 
-          const topCandidate = activity.topCandidate || {};
+          const topCandidate = (activity.topCandidate || {}) as Record<string, unknown>;
 
           const activities = topCandidate.type ? [{
-            activityType: topCandidate.type,
-            probability: parseFloat(topCandidate.probability) || 0
+            activityType: topCandidate.type as string,
+            probability: parseFloat((topCandidate.probability as string) || '0') || 0
           }] : [];
 
           timelineObjects.push({
@@ -172,15 +217,15 @@ export default function App() {
                 longitudeE7: Math.round(endCoords.lng * 1e7)
               },
               duration: {
-                startTimestamp: segment.startTime || segment.startTimestamp,
-                endTimestamp: segment.endTime || segment.endTimestamp
+                startTimestamp: (seg.startTime || seg.startTimestamp) as string,
+                endTimestamp: (seg.endTime || seg.endTimestamp) as string
               },
-              distance: parseFloat(activity.distanceMeters) || 0,
+              distance: parseFloat((activity.distanceMeters as string) || '0') || 0,
               activities: activities
             }
           });
-        } else if (segment.timelinePath) {
-          const path = segment.timelinePath;
+        } else if (seg.timelinePath) {
+          const path = seg.timelinePath as Array<{ point: string }>;
           if (path.length > 0) {
             const firstPoint = parseLatLng(path[0].point);
             const lastPoint = parseLatLng(path[path.length - 1].point);
@@ -196,15 +241,16 @@ export default function App() {
                   longitudeE7: Math.round(lastPoint.lng * 1e7)
                 },
                 duration: {
-                  startTimestamp: segment.startTime || segment.startTimestamp,
-                  endTimestamp: segment.endTime || segment.endTimestamp
+                  startTimestamp: (seg.startTime || seg.startTimestamp) as string,
+                  endTimestamp: (seg.endTime || seg.endTimestamp) as string
                 }
               }
             });
           }
         }
-      } catch (err: any) {
-        logs.push(`[${filename}] ERROR processing segment ${index}: ${err.message}`);
+      } catch (err) {
+        const error = err as Error;
+        logs.push(`[${filename}] ERROR processing segment ${index}: ${error.message}`);
       }
     });
 
@@ -212,7 +258,7 @@ export default function App() {
     return { timelineObjects, logs };
   };
 
-  const cleanData = (timelineObjects: TimelineObject[]) => {
+  const cleanData = (timelineObjects: TimelineObject[]): CleanDataResult => {
     let cleaned = [...timelineObjects];
     let removedActivities = 0;
     let removedDuplicates = 0;
@@ -364,8 +410,8 @@ export default function App() {
         case '&': return '&amp;';
         case '"': return '&quot;';
         case "'": return '&apos;';
+        default: return c;
       }
-      return c;
     });
   };
 
@@ -457,36 +503,41 @@ End: ${pv.duration.endTimestamp}]]></description>
           allLogs.push(`\n--- Processing file: ${file.name} ---`);
           const text = await file.text();
 
-          let data;
+          let data: unknown;
           try {
             data = JSON.parse(text);
             allLogs.push(`[${file.name}] Successfully parsed JSON`);
-          } catch (parseErr: any) {
-            allLogs.push(`[${file.name}] ERROR: Failed to parse JSON - ${parseErr.message}`);
-            throw new Error(`Failed to parse ${file.name}: ${parseErr.message}`);
+          } catch (parseErr) {
+            const error = parseErr as Error;
+            allLogs.push(`[${file.name}] ERROR: Failed to parse JSON - ${error.message}`);
+            throw new Error(`Failed to parse ${file.name}: ${error.message}`);
           }
 
           if (Array.isArray(data)) {
             allLogs.push(`[${file.name}] Data is an array with ${data.length} elements`);
-          } else if (typeof data === 'object') {
+          } else if (typeof data === 'object' && data !== null) {
             allLogs.push(`[${file.name}] Data is an object with keys: ${Object.keys(data).join(', ')}`);
           }
 
-          if (Array.isArray(data) || data.semanticSegments) {
-            const { timelineObjects, logs } = convertNewToOld(data, file.name);
+          const dataObj = data as NewFormatData | OldFormatData;
+
+          if (Array.isArray(data) || (dataObj as NewFormatData).semanticSegments) {
+            const { timelineObjects, logs } = convertNewToOld(dataObj as NewFormatData, file.name);
             allLogs.push(...logs);
             combinedTimelineObjects = [...combinedTimelineObjects, ...timelineObjects];
-          } else if (data.timelineObjects) {
+          } else if ((dataObj as OldFormatData).timelineObjects) {
             allLogs.push(`[${file.name}] Detected old format (timelineObjects)`);
-            allLogs.push(`[${file.name}] Found ${data.timelineObjects.length} timeline objects`);
-            combinedTimelineObjects = [...combinedTimelineObjects, ...data.timelineObjects];
+            const oldFormatData = (dataObj as OldFormatData).timelineObjects;
+            allLogs.push(`[${file.name}] Found ${oldFormatData?.length || 0} timeline objects`);
+            combinedTimelineObjects = [...combinedTimelineObjects, ...(oldFormatData || [])];
           } else {
-            const errorMsg = `File ${file.name} has unrecognized format. Expected: array (iOS), semanticSegments (Android), or timelineObjects (old format). Found keys: ${Object.keys(data).join(', ')}`;
+            const errorMsg = `File ${file.name} has unrecognized format. Expected: array (iOS), semanticSegments (Android), or timelineObjects (old format). Found keys: ${Object.keys(dataObj || {}).join(', ')}`;
             allLogs.push(`[${file.name}] ERROR: ${errorMsg}`);
             throw new Error(errorMsg);
           }
-        } catch (fileErr: any) {
-          allLogs.push(`[${file.name}] FATAL ERROR: ${fileErr.message}`);
+        } catch (fileErr) {
+          const error = fileErr as Error;
+          allLogs.push(`[${file.name}] FATAL ERROR: ${error.message}`);
           throw fileErr;
         }
       }
@@ -501,8 +552,8 @@ End: ${pv.duration.endTimestamp}]]></description>
 
       const finalData = { timelineObjects: cleaned };
 
-      let csvFiles: string[] = [];
-      let kmlFiles: string[] = [];
+      const csvFiles: string[] = [];
+      const kmlFiles: string[] = [];
 
       if (splitFiles && cleaned.length > 2000) {
         allLogs.push(`\n=== Splitting Files (${cleaned.length} records > 2000) ===`);
@@ -535,8 +586,9 @@ End: ${pv.duration.endTimestamp}]]></description>
         cleaningStats: stats,
         processingLogs: allLogs
       });
-    } catch (err: any) {
-      const errorMsg = `Error processing files: ${err.message}`;
+    } catch (err) {
+      const error = err as Error;
+      const errorMsg = `Error processing files: ${error.message}`;
       setError(errorMsg);
       console.error('Processing error:', err);
     } finally {
@@ -625,7 +677,7 @@ End: ${pv.duration.endTimestamp}]]></description>
             <div className="space-y-4 text-base text-blue-800 leading-relaxed">
               <p>
                 <strong className="text-blue-900">The Problem:</strong> Google's 2024 format change broke compatibility.
-                This tool unifies <code className="bg-blue-100 px-1 rounded font-mono text-sm">old (.json)</code> and <code className="bg-blue-100 px-1 rounded font-mono text-sm">new (Timeline.json)</code> data into one clean, usable file.
+                This tool unifies <code className="bg-blue-100 px-1 rounded font-mono text-sm">old (.json)</code> and <code className="bg-blue-100 px-1 rounded font-mono text-sm">new (Timeline.json)</code> formats into one clean, usable file.
               </p>
 
               <div className="p-4 bg-white rounded-xl shadow-inner">
@@ -654,7 +706,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                   Get OLD Timeline Data (Pre-2024)
                 </h3>
                 <ol className="list-decimal list-inside space-y-2 ml-10">
-                  <li>Go to <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">Google Takeout</a>, select only "Location History."</li>
+                  <li>Go to <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">Google Takeout</a>, select "Location History (Timeline)" or "Takeout", and download the zip.</li>
                   <li>Download the zip, and find files like <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">2018_JANUARY.json</code> in the extracted folder.</li>
                 </ol>
               </div>
@@ -707,7 +759,7 @@ End: ${pv.duration.endTimestamp}]]></description>
               accept=".json"
               onChange={handleFileUpload}
               ref={fileInputRef}
-              className="block w-full text-base text-gray-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer transition-colors"
+              className="block w-full text-base text-gray-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
             />
             {files.length > 0 && (
               <div className="mt-4 p-4 bg-gray-100 rounded-xl shadow-inner">
@@ -736,7 +788,7 @@ End: ${pv.duration.endTimestamp}]]></description>
           <div className="mb-10 p-6 bg-indigo-50/70 rounded-2xl shadow-lg">
             <h3 className="font-bold text-indigo-900 mb-5 text-xl flex items-center gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-indigo-700">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9.75 16.5c0 .375.362.583.636.436l7.5-4.5c.249-.15.249-.464 0-.614l-7.5-4.5c-.274-.147-.636.061-.636.437c.026.495-.152.921-.384 1.258a1.5 1.5 0 01-.194.223h-.001m.001 0c-.39-.126-1.074 0-1.074.437c0 .375.362.583.636.436l1.372-.823m3.33-2.673l.63.378M9.75 16.5V20.25c0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75V16.5m-8.67-6.095l-1.372.823m3.33-2.673l-.63.378M12 21a9 9 0 100-18 9 9 0 000 18z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9.75 16.5c0 .375.362.583.636.436l7.5-4.5c.249-.15.249-.464 0-.614l-7.5-4.5c-.274-.147-.636.061-.636.437c.026.495-.15.976-.447 1.307" />
               </svg>
               Data Cleaning & Optimization
             </h3>
@@ -759,7 +811,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                     </label>
                     <div className="relative group">
                       <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                         <strong>Purpose:</strong> Removes movement records (driving, walking, biking), leaving only "Visit" records (actual places you stopped).
                         <br/><br/>
                         <strong>Benefit:</strong> Dramatically reduces file size and complexity for mapping applications like Google My Maps.
@@ -787,7 +839,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                     </label>
                     <div className="relative group">
                       <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                         <strong>Purpose:</strong> Identifies and removes redundant records at the exact same location (based on PlaceId or coordinates).
                         <br/><br/>
                         <strong>Smart Filtering:</strong> Keeps the record with the most detail (e.g., the one with a confirmed address) when duplicates are found.
@@ -815,7 +867,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                     </label>
                     <div className="relative group">
                       <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                         <strong>Purpose:</strong> Automatically splits your data into multiple files if you have more than 2,000 records.
                         <br/><br/>
                         <strong>Why?</strong> Google My Maps has a 2,000 record limit per layer. This option creates separate files (each with ≤2,000 records) so you can import them as individual layers.
@@ -834,7 +886,7 @@ End: ${pv.duration.endTimestamp}]]></description>
           <button
             onClick={processFiles}
             disabled={processing || files.length === 0}
-            className="w-full bg-blue-600 text-white py-4 px-6 rounded-xl font-extrabold hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-3 text-lg shadow-lg hover:shadow-xl transform hover:scale-[1.005] active:scale-[0.99]"
+            className="w-full bg-blue-600 text-white py-4 px-6 rounded-xl font-extrabold hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {processing ? (
               <>
@@ -952,7 +1004,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                       </p>
                     </div>
                   )}
-                  <p className="mt-4"><strong>Note</strong>: Newer records from <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">timeline.json</code> don't include the place name. Because all timeline records have a <strong>PlaceId</strong>, you can retrieve the place names by using the Google Maps API and an Apps Script. <a href="https://github.com/BrandonML/google-maps-timeline-converter/tree/main/tools" target="_blank" className="text-blue-600 hover:text-blue-800 underline">View the script and instructions on how to use it in the repo</a>.</p>
+                  <p className="mt-4"><strong>Note</strong>: Newer records from <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">timeline.json</code> don't include place names; only the old format has those.</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -962,7 +1014,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                       : downloadZip(results.csv, 'timeline_converted', 'csv')
                     }
                     disabled={isLoadingJSZip}
-                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors font-extrabold text-base shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
+                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors font-extrabold shadow-lg"
                   >
                     <FileText className="w-6 h-6" />
                     <div className="text-center sm:text-left">
@@ -977,7 +1029,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                       : downloadZip(results.kml, 'timeline_converted', 'kml')
                     }
                     disabled={isLoadingJSZip}
-                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-[1.02] active:scale-[0.98]"
+                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg font-extrabold"
                   >
                     <MapPin className="w-6 h-6" />
                     <div className="text-center sm:text-left">
@@ -987,7 +1039,7 @@ End: ${pv.duration.endTimestamp}]]></description>
 
                   <button
                     onClick={() => downloadFile(results.oldFormatJson, 'timeline_converted.json', 'application/json')}
-                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-[1.02] active:scale-[0.98]"
+                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-105 font-extrabold"
                   >
                     <FileJson className="w-6 h-6" />
                     JSON
@@ -1001,7 +1053,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                 )}
 
                 <div className="my-8 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm">
-                  <p><strong>Did you find this app useful?</strong> Show your thanks by <a href="https://buymeacoffee.com/scivolette" target="_blank" className="text-blue-600 hover:text-blue-800 underline">buying me a beer</a>! Me likey beer 🍺.</p>
+                  <p><strong>Did you find this app useful?</strong> Show your thanks by <a href="https://buymeacoffee.com/scivolette" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-semibold">buying me a coffee ☕</a></p>
                 </div>
               </div>
 
@@ -1018,7 +1070,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                     <li>Click "Create a new map" then "Import" and upload your CSV or KML file.</li>
                     {results.csv.length > 1 && (
                       <li className="font-semibold text-blue-900">
-                        <strong>Multiple files:</strong> Import each file as a separate layer. After importing the first file, click "Add layer" in the left sidebar, then import the next file. Repeat for all {results.csv.length} files.
+                        <strong>Multiple files:</strong> Import each file as a separate layer. After importing the first file, click "Add layer" in the left sidebar, then import the next file. Repeat for all files.
                       </li>
                     )}
                     <li>Follow the prompts to select <strong className="text-gray-900">Latitude/Longitude</strong> for positioning and <strong className="text-gray-900">Name</strong> for the marker title.</li>
@@ -1029,7 +1081,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                         <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                         My Maps Total Limit Warning: {results.totalCount.toLocaleString()} records detected
                       </p>
-                      <p className="mt-2">Google My Maps has a <strong>10,000 record maximum per map</strong>. You have {results.totalCount.toLocaleString()} records. Consider filtering your data further or creating multiple separate maps.</p>
+                      <p className="mt-2">Google My Maps has a <strong>10,000 record maximum per map</strong>. You have {results.totalCount.toLocaleString()} records. Consider filtering your data further or creating multiple maps.</p>
                     </div>
                   )}
                 </div>
@@ -1080,11 +1132,11 @@ End: ${pv.duration.endTimestamp}]]></description>
             Made with ❤️ for travelers, data enthusiasts, and anyone who wants to visualize their journey through life.
           </p>
           <div className="mt-4 text-center text-slate-500">
-            <p>Built by <a href="https://www.facebook.com/scivolette" target="_blank" className="font-semibold text-slate-600 hover:text-blue-600 transition-colors underline">Brandon Scivolette</a></p>
+            <p>Built by <a href="https://www.facebook.com/scivolette" target="_blank" rel="noopener noreferrer" className="font-semibold text-slate-600 hover:text-blue-600 transition-colors underline">Brandon Scivolette</a></p>
             <div className="flex justify-center items-center space-x-4 mt-2">
-              <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" className="hover:text-blue-600 transition-colors underline">GitHub</a>
+              <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 transition-colors underline">GitHub</a>
               <span className="text-gray-300">|</span>
-              <a href="https://linke.ro/brandon" target="_blank" className="hover:text-blue-600 transition-colors underline">Linke</a>
+              <a href="https://linke.ro/brandon" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 transition-colors underline">Linke</a>
             </div>
           </div>
         </div>
