@@ -1,0 +1,98 @@
+name: Test & Build Validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Lint, Test & Build
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          CI: true
+
+      - name: Run TypeScript type checking
+        run: npm run build -- --noEmit
+        continue-on-error: false
+
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: false
+
+      - name: Run unit tests
+        run: npm test -- --run
+        continue-on-error: false
+
+      - name: Build production app
+        run: npm run build
+        continue-on-error: false
+
+      - name: Verify build output
+        run: |
+          if [ ! -d "docs" ]; then
+            echo "❌ Build failed: docs/ directory not found"
+            exit 1
+          fi
+          
+          if [ ! -f "docs/index.html" ]; then
+            echo "❌ Build failed: docs/index.html not found"
+            exit 1
+          fi
+          
+          ASSET_COUNT=$(find docs -type f \( -name "*.js" -o -name "*.css" \) | wc -l)
+          if [ "$ASSET_COUNT" -eq 0 ]; then
+            echo "❌ Build failed: no JS/CSS assets generated"
+            exit 1
+          fi
+          
+          echo "✅ Build verification passed"
+          echo "📦 Build output:"
+          echo "   - docs/index.html found"
+          echo "   - $ASSET_COUNT asset files generated"
+          du -sh docs
+
+      - name: Check for console errors in build
+        run: |
+          if [ -f "docs/index.html" ]; then
+            # Verify index.html is valid HTML (contains basic structure)
+            grep -q "<html" docs/index.html || exit 1
+            grep -q "<body" docs/index.html || exit 1
+            echo "✅ HTML structure verified"
+          fi
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output-${{ github.run_id }}
+          path: docs/
+          retention-days: 7
+          if-no-files-found: ignore
