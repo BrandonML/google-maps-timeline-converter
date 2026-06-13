@@ -1051,8 +1051,20 @@ End: ${pv.duration.endTimestamp}]]></description>
                   </div>
                 )}
 
-                <div className="my-8 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm">
-                  <p><strong>Did you find this app useful?</strong> Show your thanks by <a href="https://buymeacoffee.com/scivolette" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-semibold">buying me a coffee ☕</a></p>
+                <div className="mt-6 p-5 bg-gradient-to-br from-yellow-50 to-amber-100 border border-yellow-300 rounded-2xl text-center shadow-md">
+                  <div className="text-3xl" aria-hidden="true">☕</div>
+                  <h4 className="mt-2 text-xl font-extrabold text-yellow-950">Help keep this converter updated</h4>
+                  <p className="mx-auto mt-2 max-w-xl text-sm text-yellow-900">
+                    Google Timeline formats keep changing. If this tool saved you time, a small coffee helps keep it free, private, and maintained.
+                  </p>
+                  <a
+                    href="https://buymeacoffee.com/scivolette"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-400 px-5 py-3 font-extrabold text-yellow-950 shadow-md transition hover:bg-yellow-300 hover:scale-[1.02] sm:w-auto"
+                  >
+                    Buy me a coffee
+                  </a>
                 </div>
               </div>
 
