@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown } from 'lucide-react';
+import React, { useState, useRef, type DragEvent } from 'react';
+import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown, X } from 'lucide-react';
 
 // Add JSZip type declaration for browser usage
 declare const JSZip: {
@@ -91,6 +91,7 @@ export default function App() {
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [removeActivities, setRemoveActivities] = useState(true);
   const [removeDuplicates, setRemoveDuplicates] = useState(true);
   const [splitFiles, setSplitFiles] = useState(true);
@@ -470,6 +471,43 @@ End: ${pv.duration.endTimestamp}]]></description>
     setFiles(prevFiles => [...prevFiles, ...uploadedFiles]);
     setError(null);
     setResults(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      // Filter out non-JSON files
+      const jsonFiles = droppedFiles.filter(file => file.name.toLowerCase().endsWith('.json') || file.type === 'application/json');
+
+      if (jsonFiles.length > 0) {
+        setFiles(prevFiles => [...prevFiles, ...jsonFiles]);
+        setError(null);
+        setResults(null);
+      }
+    }
+  };
+
+  const removeFile = (indexToRemove: number) => {
+    setFiles(prevFiles => prevFiles.filter((_, index) => index !== indexToRemove));
   };
 
   const clearFiles = () => {
@@ -749,17 +787,38 @@ End: ${pv.duration.endTimestamp}]]></description>
               <Upload className="inline w-6 h-6 text-blue-600 mr-1" />
               Upload Your Timeline Files
             </h2>
-            <div className="mb-4 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm">
-              <p><strong>💡 Tip:</strong> You can select multiple files at once, or click "Choose Files" multiple times to add more.</p>
+
+            <div
+              className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer
+                ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50 hover:bg-gray-100 hover:border-gray-400'}`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                type="file"
+                multiple
+                accept=".json"
+                onChange={handleFileUpload}
+                ref={fileInputRef}
+                className="hidden"
+              />
+              <div className="flex flex-col items-center justify-center space-y-3">
+                <div className={`p-4 rounded-full transition-colors ${isDragging ? 'bg-blue-200 text-blue-700' : 'bg-gray-200 text-gray-600'}`}>
+                  <Upload className="w-8 h-8" />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold text-gray-700">
+                    {isDragging ? 'Drop JSON files here...' : 'Drag & Drop JSON files here'}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    or click to browse your files
+                  </p>
+                </div>
+              </div>
             </div>
-            <input
-              type="file"
-              multiple
-              accept=".json"
-              onChange={handleFileUpload}
-              ref={fileInputRef}
-              className="block w-full text-base text-gray-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            />
+
             {files.length > 0 && (
               <div className="mt-4 p-4 bg-gray-100 rounded-xl shadow-inner">
                 <div className="flex justify-between items-center mb-2 border-b border-gray-200 pb-2">
@@ -769,14 +828,23 @@ End: ${pv.duration.endTimestamp}]]></description>
                   </p>
                   <button
                     onClick={clearFiles}
-                    className="text-sm text-red-600 hover:text-red-800 font-medium transition-colors"
+                    className="text-sm text-red-600 hover:text-red-800 font-medium transition-colors bg-white px-2 py-1 rounded border border-red-200 shadow-sm hover:bg-red-50"
                   >
                     Clear All
                   </button>
                 </div>
-                <ul className="text-sm text-gray-600 space-y-1 max-h-32 overflow-y-auto pt-2">
+                <ul className="text-sm text-gray-600 space-y-2 max-h-48 overflow-y-auto pt-2 pr-2">
                   {files.map((f, i) => (
-                    <li key={i} className="truncate">• {f.name}</li>
+                    <li key={i} className="flex justify-between items-center bg-white p-2 rounded border border-gray-200 shadow-sm">
+                      <span className="truncate flex-1" title={f.name}>• {f.name}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeFile(i); }}
+                        className="ml-2 text-gray-400 hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50"
+                        title="Remove file"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </li>
                   ))}
                 </ul>
               </div>
