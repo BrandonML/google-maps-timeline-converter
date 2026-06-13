@@ -787,9 +787,6 @@ End: ${pv.duration.endTimestamp}]]></description>
               <Upload className="inline w-6 h-6 text-blue-600 mr-1" />
               Upload Your Timeline Files
             </h2>
-            <div className="mb-4 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm">
-              <p><strong>💡 Tip:</strong> You can select multiple files at once, or click the upload area multiple times to add more.</p>
-            </div>
 
             <div
               className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer
