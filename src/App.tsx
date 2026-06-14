@@ -1,7 +1,14 @@
 import React, { useState, useRef, type DragEvent } from 'react';
 import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown, X, RotateCcw, Coffee } from 'lucide-react';
 
-// Add JSZip type declaration for browser usage
+// Add Global Types for GA4 and JSZip
+declare global {
+  interface Window {
+    gtag: (command: 'event' | 'config' | 'js', eventNameOrId: string, eventParameters?: Record<string, unknown>) => void;
+    dataLayer: unknown[];
+  }
+}
+
 declare const JSZip: {
   new(): JSZipInstance;
 };
@@ -529,6 +536,12 @@ End: ${pv.duration.endTimestamp}]]></description>
       return;
     }
 
+    if (window.gtag) {
+      window.gtag('event', 'process_files', {
+        file_count: files.length,
+      });
+    }
+
     setProcessing(true);
     setError(null);
 
@@ -626,17 +639,42 @@ End: ${pv.duration.endTimestamp}]]></description>
         cleaningStats: stats,
         processingLogs: allLogs
       });
+
+      if (window.gtag) {
+        window.gtag('event', 'processing_complete', {
+          total_records: cleaned.length,
+          original_records: combinedTimelineObjects.length,
+          visit_count: cleaned.filter(o => o.placeVisit).length,
+          activity_count: cleaned.filter(o => o.activitySegment).length,
+          csv_file_count: csvFiles.length,
+        });
+      }
     } catch (err) {
       const error = err as Error;
       const errorMsg = `Error processing files: ${error.message}`;
       setError(errorMsg);
       console.error('Processing error:', err);
+      if (window.gtag) {
+        window.gtag('event', 'exception', {
+          description: errorMsg,
+          fatal: false,
+        });
+      }
     } finally {
       setProcessing(false);
     }
   };
 
   const downloadFile = (content: string, filename: string, type: string) => {
+    if (window.gtag) {
+      const fileExtension = filename.split('.').pop() || 'unknown';
+      window.gtag('event', 'file_download', {
+        file_extension: fileExtension,
+        file_name: filename,
+        is_multi_file_zip: false,
+      });
+    }
+
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -664,6 +702,16 @@ End: ${pv.duration.endTimestamp}]]></description>
   };
 
   const downloadZip = async (files: string[], baseName: string, extension: string) => {
+    if (window.gtag) {
+      window.gtag('event', 'file_download', {
+        file_extension: 'zip',
+        file_name: `${baseName}.zip`,
+        is_multi_file_zip: true,
+        contained_file_extension: extension,
+        contained_file_count: files.length,
+      });
+    }
+
     setIsLoadingJSZip(true);
     try {
       await loadJSZip();
@@ -690,6 +738,12 @@ End: ${pv.duration.endTimestamp}]]></description>
     } catch (err) {
       console.error('Error creating zip:', err);
       setError('Failed to create zip file. Please try downloading files individually.');
+      if (window.gtag) {
+        window.gtag('event', 'exception', {
+          description: 'Failed to create zip file',
+          fatal: false,
+        });
+      }
     } finally {
       setIsLoadingJSZip(false);
     }
@@ -1172,6 +1226,13 @@ End: ${pv.duration.endTimestamp}]]></description>
                         rel="noopener noreferrer"
                         className="inline-flex items-center justify-center gap-2 px-8 py-3 bg-[#FFDD00] hover:bg-[#FFD000] text-black font-extrabold rounded-full transition-transform transform hover:scale-105 active:scale-95 shadow-md"
                         style={{ fontFamily: "'Cookie', cursive, sans-serif" }}
+                        onClick={() => {
+                          if (window.gtag) {
+                            window.gtag('event', 'support_cta_click', {
+                              promotion_name: 'buy_me_a_coffee',
+                            });
+                          }
+                        }}
                       >
                         <Coffee className="w-5 h-5" />
                         Buy me a coffee
