@@ -1,5 +1,5 @@
 import React, { useState, useRef, type DragEvent } from 'react';
-import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown, X } from 'lucide-react';
+import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown, X, RotateCcw, Coffee } from 'lucide-react';
 
 // Add JSZip type declaration for browser usage
 declare const JSZip: {
@@ -87,6 +87,8 @@ interface OldFormatData {
 }
 
 export default function App() {
+  const [isIntroExpanded, setIsIntroExpanded] = useState(true);
+  const [showSupportCard, setShowSupportCard] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
@@ -643,6 +645,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 100);
+    setShowSupportCard(true);
   };
 
   const loadJSZip = async (): Promise<void> => {
@@ -682,6 +685,7 @@ End: ${pv.duration.endTimestamp}]]></description>
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 100);
+      setShowSupportCard(true);
     } catch (err) {
       console.error('Error creating zip:', err);
       setError('Failed to create zip file. Please try downloading files individually.');
@@ -704,81 +708,103 @@ End: ${pv.duration.endTimestamp}]]></description>
             </div>
           </div>
 
-          {/* What This Does Section */}
-          <div className="mb-10 p-6 bg-blue-50 rounded-2xl relative shadow-md">
-            <h2 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
-              <AlertCircle className="w-6 h-6" />
-              What Does This App Do?
-            </h2>
+          {/* Collapsible Intro Section */}
+          <div className="mb-12">
+            <button
+              onClick={() => setIsIntroExpanded(!isIntroExpanded)}
+              className="w-full flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-gray-50 transition-colors mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <span className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                <Info className="w-5 h-5 text-blue-600" />
+                How to Use This Tool
+              </span>
+              <ChevronDown
+                className={`w-6 h-6 text-gray-500 transition-transform duration-200 ${
+                  isIntroExpanded ? 'transform rotate-180' : ''
+                }`}
+              />
+            </button>
 
-            <div className="space-y-4 text-base text-blue-800 leading-relaxed">
-              <p>
-                <strong className="text-blue-900">The Problem:</strong> Google's 2024 format change broke compatibility.
-                This tool unifies <code className="bg-blue-100 px-1 rounded font-mono text-sm">old (.json)</code> and <code className="bg-blue-100 px-1 rounded font-mono text-sm">new (Timeline.json)</code> formats into one clean, usable file.
-              </p>
+            {isIntroExpanded && (
+              <div className="space-y-6">
+                {/* What This Does Section */}
+                <div className="p-6 bg-blue-50 rounded-2xl relative shadow-md">
+                  <h2 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
+                    <AlertCircle className="w-6 h-6" />
+                    What Does This App Do?
+                  </h2>
 
-              <div className="p-4 bg-white rounded-xl shadow-inner">
-                <p className="font-semibold mb-3 text-blue-900">Key Benefits:</p>
-                <ul className="space-y-2 ml-6 list-disc text-base marker:text-blue-500">
-                  <li>Combine data from multiple accounts/years.</li>
-                  <li>Create custom travel maps in Google My Maps.</li>
-                  <li>Clean data to meet the 2,000-record (per layer) limit for Google My Maps import.</li>
-                  <li>Keep a permanent, unified history backup.</li>
-                </ul>
+                  <div className="space-y-4 text-base text-blue-800 leading-relaxed">
+                    <p>
+                      <strong className="text-blue-900">The Problem:</strong> Google's 2024 format change broke compatibility.
+                      This tool unifies <code className="bg-blue-100 px-1 rounded font-mono text-sm">old (.json)</code> and <code className="bg-blue-100 px-1 rounded font-mono text-sm">new (Timeline.json)</code> formats into one clean, usable file.
+                    </p>
+
+                    <div className="p-4 bg-white rounded-xl shadow-inner">
+                      <p className="font-semibold mb-3 text-blue-900">Key Benefits:</p>
+                      <ul className="space-y-2 ml-6 list-disc text-base marker:text-blue-500">
+                        <li>Combine data from multiple accounts/years.</li>
+                        <li>Create custom travel maps in Google My Maps.</li>
+                        <li>Clean data to meet the 2,000-record (per layer) limit for Google My Maps import.</li>
+                        <li>Keep a permanent, unified history backup.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step-by-Step Instructions */}
+                <div className="p-8 bg-gray-100 rounded-2xl shadow-inner">
+                  <h2 className="font-bold text-gray-900 mb-6 text-2xl flex items-center gap-2">
+                    <MapPin className="w-6 h-6" />
+                    Your Data Workflow
+                  </h2>
+
+                  <div className="space-y-8 text-base text-gray-700 leading-relaxed">
+                    <div>
+                      <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
+                        <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">1</span>
+                        Get OLD Timeline Data (Pre-2024)
+                      </h3>
+                      <ol className="list-decimal list-inside space-y-2 ml-10">
+                        <li>Go to <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">Google Takeout</a>, select "Location History (Timeline)" or "Takeout", and download the zip.</li>
+                        <li>Download the zip, and find files like <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">2018_JANUARY.json</code> in the extracted folder.</li>
+                      </ol>
+                    </div>
+
+                    <div>
+                      <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
+                        <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">2</span>
+                        Get NEW Timeline Data (2024+)
+                      </h3>
+                      <p className="mb-3 text-base text-red-700 font-semibold flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-red-500" />
+                        This data is only on your phone — not in Google Takeout!
+                      </p>
+                      <ol className="list-decimal list-inside space-y-2 ml-10">
+                        <li>On your phone: <strong className="text-gray-900">Settings → Location → Location Services → Timeline → Export Timeline Data.</strong></li>
+                        <li>Transfer the generated <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">Timeline.json</code> file to your computer.</li>
+                      </ol>
+                    </div>
+
+                    <div>
+                      <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
+                        <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">3</span>
+                        Upload & Download
+                      </h3>
+                      <ol className="list-decimal list-inside space-y-2 ml-10">
+                        <li>Use the "Choose Files" button below to select <strong>ALL</strong> your JSON files (old and new).</li>
+                        <li>Click "Process Files" and download the merged, cleaned data.</li>
+                      </ol>
+                    </div>
+
+                    <div className="p-4 bg-gray-200 rounded-xl mt-4">
+                      <p className="font-semibold text-gray-900 flex items-center gap-2">🔒 Privacy Note:</p>
+                      <p className="text-sm mt-1 ml-6">All processing happens directly in your browser. Your location data never leaves your device.</p>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-
-          {/* Step-by-Step Instructions */}
-          <div className="mb-12 p-8 bg-gray-100 rounded-2xl shadow-inner">
-            <h2 className="font-bold text-gray-900 mb-6 text-2xl flex items-center gap-2">
-              <MapPin className="w-6 h-6" />
-              Your Data Workflow
-            </h2>
-
-            <div className="space-y-8 text-base text-gray-700 leading-relaxed">
-              <div>
-                <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
-                  <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">1</span>
-                  Get OLD Timeline Data (Pre-2024)
-                </h3>
-                <ol className="list-decimal list-inside space-y-2 ml-10">
-                  <li>Go to <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">Google Takeout</a>, select "Location History (Timeline)" or "Takeout", and download the zip.</li>
-                  <li>Download the zip, and find files like <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">2018_JANUARY.json</code> in the extracted folder.</li>
-                </ol>
-              </div>
-
-              <div>
-                <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
-                  <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">2</span>
-                  Get NEW Timeline Data (2024+)
-                </h3>
-                <p className="mb-3 text-base text-red-700 font-semibold flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5 text-red-500" />
-                  This data is only on your phone — not in Google Takeout!
-                </p>
-                <ol className="list-decimal list-inside space-y-2 ml-10">
-                  <li>On your phone: <strong className="text-gray-900">Settings → Location → Location Services → Timeline → Export Timeline Data.</strong></li>
-                  <li>Transfer the generated <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">Timeline.json</code> file to your computer.</li>
-                </ol>
-              </div>
-
-              <div>
-                <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
-                  <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">3</span>
-                  Upload & Download
-                </h3>
-                <ol className="list-decimal list-inside space-y-2 ml-10">
-                  <li>Use the "Choose Files" button below to select <strong>ALL</strong> your JSON files (old and new).</li>
-                  <li>Click "Process Files" and download the merged, cleaned data.</li>
-                </ol>
-              </div>
-
-              <div className="p-4 bg-gray-200 rounded-xl mt-4">
-                <p className="font-semibold text-gray-900 flex items-center gap-2">🔒 Privacy Note:</p>
-                <p className="text-sm text-gray-800">All processing happens directly in your browser. Your location data never leaves your device.</p>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* File Upload Section */}
@@ -949,22 +975,32 @@ End: ${pv.duration.endTimestamp}]]></description>
             </div>
           </div>
 
-          {/* Process Button */}
-          <button
-            onClick={processFiles}
-            disabled={processing || files.length === 0}
-            className="w-full bg-blue-600 text-white py-4 px-6 rounded-xl font-extrabold hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-          >
-            {processing ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Processing your files...
-              </>
-            ) : 'Process Files'}
-          </button>
+          {/* Process / Clear Button */}
+          {results ? (
+            <button
+              onClick={clearFiles}
+              className="w-full bg-white text-gray-700 border-2 border-gray-300 py-4 px-6 rounded-xl font-extrabold hover:bg-gray-50 hover:text-gray-900 transition-colors flex items-center justify-center gap-2 shadow-sm"
+            >
+              <RotateCcw className="w-5 h-5" />
+              Clear Data & Start Over
+            </button>
+          ) : (
+            <button
+              onClick={processFiles}
+              disabled={files.length === 0 || processing}
+              className="w-full bg-blue-600 text-white py-4 px-6 rounded-xl font-extrabold hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 shadow-sm"
+            >
+              {processing ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing your files...
+                </>
+              ) : 'Process Files'}
+            </button>
+          )}
 
           {/* Error Display */}
           {error && (
@@ -1119,9 +1155,28 @@ End: ${pv.duration.endTimestamp}]]></description>
                   </div>
                 )}
 
-                <div className="my-8 p-4 bg-yellow-50 rounded-xl text-base text-yellow-800 shadow-sm">
-                  <p><strong>Did you find this app useful?</strong> Show your thanks by <a href="https://buymeacoffee.com/scivolette" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-semibold">buying me a coffee ☕</a></p>
-                </div>
+                  {/* Download-Triggered Support Card */}
+                  {showSupportCard && (
+                    <div className="my-8 p-6 bg-gradient-to-br from-[#FFDD00]/10 to-[#FFDD00]/5 border border-[#FFDD00]/20 rounded-2xl shadow-sm text-center transform transition-all duration-500 ease-out translate-y-0 opacity-100">
+                      <div className="w-16 h-16 bg-[#FFDD00]/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Coffee className="w-8 h-8 text-[#FFDD00] drop-shadow-sm" style={{ filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.1))' }} />
+                      </div>
+                      <h3 className="text-xl font-bold text-gray-900 mb-2">Thank you for using this tool!</h3>
+                      <p className="text-gray-600 mb-6 max-w-md mx-auto text-base">
+                        Saved you some time? Drop a coffee in the mug to keep this tool running free and ad-free!
+                      </p>
+                      <a
+                        href="https://buymeacoffee.com/scivolette"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center gap-2 px-8 py-3 bg-[#FFDD00] hover:bg-[#FFD000] text-black font-extrabold rounded-full transition-transform transform hover:scale-105 active:scale-95 shadow-md"
+                        style={{ fontFamily: "'Cookie', cursive, sans-serif" }}
+                      >
+                        <Coffee className="w-5 h-5" />
+                        Buy me a coffee
+                      </a>
+                    </div>
+                  )}
               </div>
 
               {/* Next Steps Section */}
