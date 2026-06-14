@@ -516,6 +516,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     setFiles([]);
     setError(null);
     setResults(null);
+    setShowSupportCard(false);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -709,10 +710,10 @@ End: ${pv.duration.endTimestamp}]]></description>
           </div>
 
           {/* Collapsible Intro Section */}
-          <div className="mb-12">
+          <div className="mb-12 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <button
               onClick={() => setIsIntroExpanded(!isIntroExpanded)}
-              className="w-full flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-gray-50 transition-colors mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={`w-full flex items-center justify-between p-5 bg-white hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${isIntroExpanded ? 'border-b border-gray-100' : ''}`}
             >
               <span className="font-bold text-gray-800 text-lg flex items-center gap-2">
                 <Info className="w-5 h-5 text-blue-600" />
@@ -726,9 +727,9 @@ End: ${pv.duration.endTimestamp}]]></description>
             </button>
 
             {isIntroExpanded && (
-              <div className="space-y-6">
+              <div className="p-6 space-y-6 bg-gray-50/50">
                 {/* What This Does Section */}
-                <div className="p-6 bg-blue-50 rounded-2xl relative shadow-md">
+                <div className="p-6 bg-blue-50 rounded-xl relative shadow-sm border border-blue-100">
                   <h2 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
                     <AlertCircle className="w-6 h-6" />
                     What Does This App Do?
@@ -753,7 +754,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                 </div>
 
                 {/* Step-by-Step Instructions */}
-                <div className="p-8 bg-gray-100 rounded-2xl shadow-inner">
+                <div className="p-8 bg-white rounded-xl shadow-sm border border-gray-100">
                   <h2 className="font-bold text-gray-900 mb-6 text-2xl flex items-center gap-2">
                     <MapPin className="w-6 h-6" />
                     Your Data Workflow
