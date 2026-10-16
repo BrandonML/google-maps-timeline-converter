@@ -701,7 +701,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     }
   };
 
-  const downloadFile = (content: string, filename: string, type: string) => {
+  const downloadFile = (content: string, filename: string, type: string, showSupport = true) => {
     if (window.gtag) {
       const fileExtension = filename.split('.').pop() || 'unknown';
       window.gtag('event', 'file_download', {
@@ -720,7 +720,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 100);
-    revealSupportCard();
+    if (showSupport) revealSupportCard();
   };
 
   const loadJSZip = async (): Promise<void> => {
@@ -1256,7 +1256,15 @@ End: ${pv.duration.endTimestamp}]]></description>
                   >
                     <button
                       type="button"
-                      onClick={() => setShowSupportCard(false)}
+                      onClick={() => {
+                        setShowSupportCard(false);
+                        if (window.gtag) {
+                          window.gtag('event', 'support_card_dismiss', {
+                            promotion_name: 'buy_me_a_coffee',
+                            placement: 'post_download_card',
+                          });
+                        }
+                      }}
                       aria-label="Dismiss"
                       className="absolute top-1 right-1 sm:top-2 sm:right-2 flex items-center justify-center w-10 h-10 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
                     >
@@ -1355,7 +1363,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                     </div>
 
                     <button
-                      onClick={() => downloadFile(results.processingLogs.join('\n'), 'processing_logs.txt', 'text/plain')}
+                      onClick={() => downloadFile(results.processingLogs.join('\n'), 'processing_logs.txt', 'text/plain', false)}
                       className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-xl transition-colors font-semibold text-sm shadow-lg flex items-center justify-center gap-2"
                     >
                       <Download className="w-5 h-5" />
