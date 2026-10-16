@@ -1,4 +1,4 @@
-import React, { useState, useRef, type DragEvent } from 'react';
+import React, { useState, useRef, useEffect, type DragEvent } from 'react';
 import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown, X, RotateCcw, Coffee } from 'lucide-react';
 
 // Add Global Types for GA4 and JSZip
@@ -96,6 +96,7 @@ interface OldFormatData {
 export default function App() {
   const [isIntroExpanded, setIsIntroExpanded] = useState(true);
   const [showSupportCard, setShowSupportCard] = useState(false);
+  const [supportCardDownloadCount, setSupportCardDownloadCount] = useState(0);
   const [files, setFiles] = useState<File[]>([]);
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
@@ -108,6 +109,41 @@ export default function App() {
   const [isLoadingJSZip, setIsLoadingJSZip] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const supportCardRef = useRef<HTMLDivElement>(null);
+
+  // Fires once each time the card goes from hidden to visible, not on re-renders.
+  useEffect(() => {
+    if (showSupportCard && window.gtag) {
+      window.gtag('event', 'support_card_view', {
+        promotion_name: 'buy_me_a_coffee',
+        placement: 'post_download_card',
+      });
+    }
+  }, [showSupportCard]);
+
+  // Runs after every download (even if the card is already open) so it is never off screen.
+  useEffect(() => {
+    if (supportCardDownloadCount === 0) return;
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    supportCardRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      block: 'nearest',
+    });
+  }, [supportCardDownloadCount]);
+
+  const revealSupportCard = () => {
+    setShowSupportCard(true);
+    setSupportCardDownloadCount((count) => count + 1);
+  };
+
+  const trackSupportClick = (placement: 'post_download_card' | 'next_steps_link') => {
+    if (window.gtag) {
+      window.gtag('event', 'support_cta_click', {
+        promotion_name: 'buy_me_a_coffee',
+        placement,
+      });
+    }
+  };
 
   const parseLatLng = (latLngStr?: string): { lat: number; lng: number } => {
     if (!latLngStr) return { lat: 0, lng: 0 };
@@ -665,7 +701,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     }
   };
 
-  const downloadFile = (content: string, filename: string, type: string) => {
+  const downloadFile = (content: string, filename: string, type: string, showSupport = true) => {
     if (window.gtag) {
       const fileExtension = filename.split('.').pop() || 'unknown';
       window.gtag('event', 'file_download', {
@@ -684,7 +720,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 100);
-    setShowSupportCard(true);
+    if (showSupport) revealSupportCard();
   };
 
   const loadJSZip = async (): Promise<void> => {
@@ -734,7 +770,7 @@ End: ${pv.duration.endTimestamp}]]></description>
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 100);
-      setShowSupportCard(true);
+      revealSupportCard();
     } catch (err) {
       console.error('Error creating zip:', err);
       setError('Failed to create zip file. Please try downloading files individually.');
@@ -1210,35 +1246,53 @@ End: ${pv.duration.endTimestamp}]]></description>
                   </div>
                 )}
 
-                  {/* Download-Triggered Support Card */}
-                  {showSupportCard && (
-                    <div className="my-8 p-6 bg-gradient-to-br from-[#FFDD00]/10 to-[#FFDD00]/5 border border-[#FFDD00]/20 rounded-2xl shadow-sm text-center transform transition-all duration-500 ease-out translate-y-0 opacity-100">
-                      <div className="w-16 h-16 bg-[#FFDD00]/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Coffee className="w-8 h-8 text-[#FFDD00] drop-shadow-sm" style={{ filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.1))' }} />
+                {/* Download-Triggered Support Card */}
+                {showSupportCard && (
+                  <div
+                    ref={supportCardRef}
+                    role="region"
+                    aria-label="Support this tool"
+                    className="relative mt-6 scroll-mb-6 p-5 sm:p-6 bg-white border-2 border-[#FFDD00] rounded-2xl shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSupportCard(false);
+                        if (window.gtag) {
+                          window.gtag('event', 'support_card_dismiss', {
+                            promotion_name: 'buy_me_a_coffee',
+                            placement: 'post_download_card',
+                          });
+                        }
+                      }}
+                      aria-label="Dismiss"
+                      className="absolute top-1 right-1 sm:top-2 sm:right-2 flex items-center justify-center w-10 h-10 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                    <div className="flex flex-col lg:flex-row items-center gap-4 lg:gap-6 text-center lg:text-left lg:pr-8">
+                      <div className="w-14 h-14 flex-shrink-0 bg-[#FFDD00] rounded-full flex items-center justify-center">
+                        <Coffee className="w-7 h-7 text-gray-900" />
                       </div>
-                      <h3 className="text-xl font-bold text-gray-900 mb-2">Thank you for using this tool!</h3>
-                      <p className="text-gray-600 mb-6 max-w-md mx-auto text-base">
-                        Saved you some time? Drop a coffee in the mug to keep this tool running free and ad-free!
-                      </p>
+                      <div className="flex-1 max-w-lg lg:max-w-none">
+                        <h3 className="text-xl font-bold text-gray-900 mb-1">Your files are ready</h3>
+                        <p className="text-gray-700 text-base">
+                          This tool is free, ad-free and built by one person. If it saved you an hour of cleanup, a coffee keeps it running.
+                        </p>
+                      </div>
                       <a
                         href="https://buymeacoffee.com/scivolette"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center gap-2 px-8 py-3 bg-[#FFDD00] hover:bg-[#FFD000] text-black font-extrabold rounded-full transition-transform transform hover:scale-105 active:scale-95 shadow-md"
-                        style={{ fontFamily: "'Cookie', cursive, sans-serif" }}
-                        onClick={() => {
-                          if (window.gtag) {
-                            window.gtag('event', 'support_cta_click', {
-                              promotion_name: 'buy_me_a_coffee',
-                            });
-                          }
-                        }}
+                        className="w-full sm:w-auto flex-shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#FFDD00] hover:bg-[#FFD000] text-gray-900 font-extrabold rounded-full transition-transform transform hover:scale-105 active:scale-95 shadow-md"
+                        onClick={() => trackSupportClick('post_download_card')}
                       >
                         <Coffee className="w-5 h-5" />
                         Buy me a coffee
                       </a>
                     </div>
-                  )}
+                  </div>
+                )}
               </div>
 
               {/* Next Steps Section */}
@@ -1268,6 +1322,19 @@ End: ${pv.duration.endTimestamp}]]></description>
                       <p className="mt-2">Google My Maps has a <strong>10,000 record maximum per map</strong>. You have {results.totalCount.toLocaleString()} records. Consider filtering your data further or creating multiple maps.</p>
                     </div>
                   )}
+                  <p className="pt-3 text-sm text-gray-500">
+                    Free and ad-free, built by one person.{' '}
+                    <a
+                      href="https://buymeacoffee.com/scivolette"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-gray-800"
+                      onClick={() => trackSupportClick('next_steps_link')}
+                    >
+                      Buy me a coffee
+                    </a>
+                    {' '}if it helped.
+                  </p>
                 </div>
               </div>
 
@@ -1296,7 +1363,7 @@ End: ${pv.duration.endTimestamp}]]></description>
                     </div>
 
                     <button
-                      onClick={() => downloadFile(results.processingLogs.join('\n'), 'processing_logs.txt', 'text/plain')}
+                      onClick={() => downloadFile(results.processingLogs.join('\n'), 'processing_logs.txt', 'text/plain', false)}
                       className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-xl transition-colors font-semibold text-sm shadow-lg flex items-center justify-center gap-2"
                     >
                       <Download className="w-5 h-5" />
