@@ -1,5 +1,11 @@
-import React, { useState, useRef, useEffect, type DragEvent } from 'react';
-import { Upload, Download, MapPin, Activity, FileJson, FileText, Info, AlertCircle, ChevronDown, X, RotateCcw, Coffee } from 'lucide-react';
+import { useState, useRef, useEffect, type ChangeEvent, type DragEvent } from 'react';
+import {
+  Upload, Download, MapPin, Activity, FileJson, Info, CircleAlert, ChevronDown, X, RotateCcw, Coffee,
+  Check, Lock, Layers, Package, Terminal,
+} from 'lucide-react';
+import { OptionRow } from './components/OptionRow';
+import { sniffFileFormat, type FileFormat } from './lib/detectFormat';
+import { formatFileSize, percentRemoved, pluralize } from './lib/format';
 
 // Add Global Types for GA4 and JSZip
 declare global {
@@ -62,12 +68,54 @@ interface Results {
   activityCount: number;
   totalCount: number;
   originalCount: number;
+  fileCount: number;
   cleaningStats: {
     removedActivities: number;
     removedDuplicates: number;
     totalRemoved: number;
   };
   processingLogs: string[];
+}
+
+interface FileEntry {
+  id: number;
+  file: File;
+  format: FileFormat | 'checking';
+}
+
+interface AppError {
+  message: string;
+  // Set when a specific uploaded file caused the error, to power the "remove and retry" action.
+  fileName?: string;
+  fileId?: number;
+}
+
+type ZipFormat = 'csv' | 'kml';
+type SupportPlacement = 'results_card' | 'header_pill' | 'footer_link';
+
+const BUY_ME_A_COFFEE_URL = 'https://buymeacoffee.com/scivolette';
+const ISSUES_URL = 'https://github.com/BrandonML/google-maps-timeline-converter/issues';
+
+const FORMAT_TAGS: Record<FileEntry['format'], { label: string; className: string } | null> = {
+  checking: null,
+  pre2024: { label: 'Pre-2024', className: 'bg-divider text-body' },
+  current: { label: '2024+', className: 'bg-success-tint text-[oklch(0.45_0.12_160)]' },
+  unverified: { label: 'JSON', className: 'bg-divider text-body' },
+  unknown: { label: 'Unknown', className: 'bg-danger-tint text-danger-ink' },
+};
+
+const linkClass = 'text-link underline underline-offset-2 hover:text-link-hover';
+const cardClass = 'rounded-2xl border border-line bg-white';
+const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function Spinner({ className = '' }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block h-4 w-4 animate-spin-fast rounded-full border-2 border-current border-t-transparent ${className}`}
+    />
+  );
 }
 
 interface ConversionResult {
@@ -95,28 +143,34 @@ interface OldFormatData {
 
 export default function App() {
   const [isIntroExpanded, setIsIntroExpanded] = useState(true);
-  const [showSupportCard, setShowSupportCard] = useState(false);
+  // Once dismissed the support card stays hidden for the session, including after Start over.
+  const [isSupportDismissed, setIsSupportDismissed] = useState(false);
+  const [hasDownloaded, setHasDownloaded] = useState(false);
   const [supportCardDownloadCount, setSupportCardDownloadCount] = useState(0);
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<FileEntry[]>([]);
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [removeActivities, setRemoveActivities] = useState(true);
   const [removeDuplicates, setRemoveDuplicates] = useState(true);
   const [splitFiles, setSplitFiles] = useState(true);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
-  const [isLoadingJSZip, setIsLoadingJSZip] = useState(false);
+  const [loadingZipFormat, setLoadingZipFormat] = useState<ZipFormat | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const supportCardRef = useRef<HTMLDivElement>(null);
+  const supportCardRef = useRef<HTMLElement>(null);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const nextFileId = useRef(0);
+
+  const showSupportCard = results !== null && !isSupportDismissed;
 
   // Fires once each time the card goes from hidden to visible, not on re-renders.
   useEffect(() => {
     if (showSupportCard && window.gtag) {
       window.gtag('event', 'support_card_view', {
         promotion_name: 'buy_me_a_coffee',
-        placement: 'post_download_card',
+        placement: 'results_card',
       });
     }
   }, [showSupportCard]);
@@ -124,19 +178,38 @@ export default function App() {
   // Runs after every download (even if the card is already open) so it is never off screen.
   useEffect(() => {
     if (supportCardDownloadCount === 0) return;
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     supportCardRef.current?.scrollIntoView({
-      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
       block: 'nearest',
     });
   }, [supportCardDownloadCount]);
 
-  const revealSupportCard = () => {
-    setShowSupportCard(true);
+  // The input group (and the focused Convert button) disappears when results arrive,
+  // so move focus and scroll to the results instead of dropping the user at the page's end.
+  useEffect(() => {
+    if (!results) return;
+    const heading = resultsHeadingRef.current;
+    if (!heading) return;
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+  }, [results]);
+
+  const registerDownload = () => {
+    setHasDownloaded(true);
     setSupportCardDownloadCount((count) => count + 1);
   };
 
-  const trackSupportClick = (placement: 'post_download_card' | 'next_steps_link') => {
+  const dismissSupportCard = () => {
+    setIsSupportDismissed(true);
+    if (window.gtag) {
+      window.gtag('event', 'support_card_dismiss', {
+        promotion_name: 'buy_me_a_coffee',
+        placement: 'results_card',
+      });
+    }
+  };
+
+  const trackSupportClick = (placement: SupportPlacement) => {
     if (window.gtag) {
       window.gtag('event', 'support_cta_click', {
         promotion_name: 'buy_me_a_coffee',
@@ -511,11 +584,23 @@ End: ${pv.duration.endTimestamp}]]></description>
     return chunks;
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const uploadedFiles = e.target.files ? Array.from(e.target.files) : [];
-    setFiles(prevFiles => [...prevFiles, ...uploadedFiles]);
+  const addFiles = (newFiles: File[]) => {
+    if (newFiles.length === 0) return;
+
+    const entries: FileEntry[] = newFiles.map(file => ({ id: nextFileId.current++, file, format: 'checking' }));
+    setFiles(prevFiles => [...prevFiles, ...entries]);
     setError(null);
-    setResults(null);
+
+    // Label each file (Pre-2024 / 2024+) from a small sample of its contents.
+    entries.forEach(entry => {
+      void sniffFileFormat(entry.file).then(format => {
+        setFiles(prevFiles => prevFiles.map(f => (f.id === entry.id ? { ...f, format } : f)));
+      });
+    });
+  };
+
+  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    addFiles(e.target.files ? Array.from(e.target.files) : []);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -530,6 +615,8 @@ End: ${pv.duration.endTimestamp}]]></description>
   const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    // Ignore leave events fired when the pointer merely moves onto a child element.
+    if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
     setIsDragging(false);
   };
 
@@ -543,51 +630,74 @@ End: ${pv.duration.endTimestamp}]]></description>
       // Filter out non-JSON files
       const jsonFiles = droppedFiles.filter(file => file.name.toLowerCase().endsWith('.json') || file.type === 'application/json');
 
-      if (jsonFiles.length > 0) {
-        setFiles(prevFiles => [...prevFiles, ...jsonFiles]);
-        setError(null);
-        setResults(null);
-      }
+      addFiles(jsonFiles);
     }
   };
 
-  const removeFile = (indexToRemove: number) => {
-    setFiles(prevFiles => prevFiles.filter((_, index) => index !== indexToRemove));
+  const removeFile = (idToRemove: number) => {
+    setFiles(prevFiles => prevFiles.filter(f => f.id !== idToRemove));
+    if (error?.fileId === idToRemove) setError(null);
   };
 
   const clearFiles = () => {
     setFiles([]);
     setError(null);
-    setResults(null);
-    setShowSupportCard(false);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
-  const processFiles = async () => {
-    if (files.length === 0) {
-      setError('Please upload at least one file');
+  const startOver = () => {
+    clearFiles();
+    setResults(null);
+    setHasDownloaded(false);
+    setIsIntroExpanded(true);
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  };
+
+  const retryWithoutFailedFile = () => {
+    if (error?.fileId === undefined) return;
+
+    const remaining = files.filter(f => f.id !== error.fileId);
+    setFiles(remaining);
+    setError(null);
+
+    if (window.gtag) {
+      window.gtag('event', 'error_retry_click', {
+        remaining_file_count: remaining.length,
+      });
+    }
+
+    if (remaining.length > 0) {
+      void processFiles(remaining);
+    }
+  };
+
+  const processFiles = async (entries: FileEntry[] = files) => {
+    if (entries.length === 0) {
+      setError({ message: 'Please upload at least one file' });
       return;
     }
 
     if (window.gtag) {
       window.gtag('event', 'process_files', {
-        file_count: files.length,
+        file_count: entries.length,
       });
     }
 
     setProcessing(true);
     setError(null);
 
+    let failedFile: { id: number; name: string } | undefined;
+
     try {
       let combinedTimelineObjects: TimelineObject[] = [];
       const allLogs: string[] = [];
       allLogs.push(`=== Processing Started at ${new Date().toISOString()} ===`);
-      allLogs.push(`Total files to process: ${files.length}`);
+      allLogs.push(`Total files to process: ${entries.length}`);
 
-      for (const file of files) {
+      for (const { id, file } of entries) {
         try {
           allLogs.push(`\n--- Processing file: ${file.name} ---`);
           const text = await file.text();
@@ -625,6 +735,7 @@ End: ${pv.duration.endTimestamp}]]></description>
             throw new Error(errorMsg);
           }
         } catch (fileErr) {
+          failedFile = { id, name: file.name };
           const error = fileErr as Error;
           allLogs.push(`[${file.name}] FATAL ERROR: ${error.message}`);
           throw fileErr;
@@ -672,9 +783,11 @@ End: ${pv.duration.endTimestamp}]]></description>
         activityCount: cleaned.filter(o => o.activitySegment).length,
         totalCount: cleaned.length,
         originalCount: combinedTimelineObjects.length,
+        fileCount: entries.length,
         cleaningStats: stats,
         processingLogs: allLogs
       });
+      setIsIntroExpanded(false);
 
       if (window.gtag) {
         window.gtag('event', 'processing_complete', {
@@ -688,7 +801,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     } catch (err) {
       const error = err as Error;
       const errorMsg = `Error processing files: ${error.message}`;
-      setError(errorMsg);
+      setError({ message: errorMsg, fileName: failedFile?.name, fileId: failedFile?.id });
       console.error('Processing error:', err);
       if (window.gtag) {
         window.gtag('event', 'exception', {
@@ -720,7 +833,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 100);
-    if (showSupport) revealSupportCard();
+    if (showSupport) registerDownload();
   };
 
   const loadJSZip = async (): Promise<void> => {
@@ -737,7 +850,7 @@ End: ${pv.duration.endTimestamp}]]></description>
     });
   };
 
-  const downloadZip = async (files: string[], baseName: string, extension: string) => {
+  const downloadZip = async (files: string[], baseName: string, extension: ZipFormat) => {
     if (window.gtag) {
       window.gtag('event', 'file_download', {
         file_extension: 'zip',
@@ -748,7 +861,8 @@ End: ${pv.duration.endTimestamp}]]></description>
       });
     }
 
-    setIsLoadingJSZip(true);
+    setError(null);
+    setLoadingZipFormat(extension);
     try {
       await loadJSZip();
 
@@ -770,10 +884,10 @@ End: ${pv.duration.endTimestamp}]]></description>
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 100);
-      revealSupportCard();
+      registerDownload();
     } catch (err) {
       console.error('Error creating zip:', err);
-      setError('Failed to create zip file. Please try downloading files individually.');
+      setError({ message: 'Failed to create zip file. Please try downloading files individually.' });
       if (window.gtag) {
         window.gtag('event', 'exception', {
           description: 'Failed to create zip file',
@@ -781,616 +895,571 @@ End: ${pv.duration.endTimestamp}]]></description>
         });
       }
     } finally {
-      setIsLoadingJSZip(false);
+      setLoadingZipFormat(null);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-3xl shadow-2xl shadow-blue-100 p-6 sm:p-10">
+  const hasFiles = files.length > 0;
+  const failedFileLabel = error?.fileId !== undefined && error.fileName ? error.fileName : null;
 
-          {/* Header */}
-          <div className="flex items-center gap-4 mb-10 pb-4 border-b border-gray-100">
-            <MapPin className="w-12 h-12 text-blue-600 flex-shrink-0" />
-            <div>
-              <h1 className="text-3xl font-extrabold text-gray-900">Google Maps Timeline Data Converter</h1>
-              <p className="text-base text-gray-500 mt-1">Merge, clean, and convert your Google Location History (Old & New Formats)</p>
+  const percentOfOriginal = (count: number): string =>
+    results && results.originalCount > 0 ? `${(count / results.originalCount) * 100}%` : '0%';
+
+  const convertLabel = processing
+    ? `Processing ${pluralize(files.length, 'file')}…`
+    : hasFiles
+      ? `Convert ${pluralize(files.length, 'file')}`
+      : 'Add files to convert';
+
+  const renderZipButtonContent = (format: ZipFormat, parts: number) =>
+    loadingZipFormat === format ? (
+      <>
+        <Spinner />
+        Preparing zip…
+      </>
+    ) : (
+      <>
+        <Download size={15} aria-hidden="true" />
+        {parts > 1 ? `Download ${parts} files` : 'Download'}
+      </>
+    );
+
+  const renderResults = (r: Results) => {
+    const parts = r.csv.length;
+    const isSplit = parts > 1;
+    const reduction = percentRemoved(r.cleaningStats.totalRemoved, r.originalCount);
+
+    return (
+      <div className="mt-3 flex flex-col gap-5">
+        {/* Summary */}
+        <section className={`${cardClass} flex flex-col gap-5 p-6`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-success-tint text-success">
+                <Check size={18} aria-hidden="true" />
+              </div>
+              <div>
+                <h2
+                  ref={resultsHeadingRef}
+                  tabIndex={-1}
+                  className="m-0 scroll-mt-6 text-xl font-bold tracking-[-0.02em] outline-none"
+                >
+                  {pluralize(r.totalCount, 'record')} ready
+                </h2>
+                <p className="mt-[3px] text-sm text-muted">
+                  {r.fileCount > 1 ? 'Merged' : 'Converted'} {pluralize(r.fileCount, 'file')} · {reduction}% smaller than the original
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={startOver}
+              className={`flex cursor-pointer items-center gap-1.5 rounded-[10px] border border-[oklch(0.9_0.005_260)] bg-white px-3 py-2 text-[13px] font-medium text-body hover:bg-tile ${focusRing}`}
+            >
+              <RotateCcw size={14} aria-hidden="true" />
+              Start over
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-2.5">
+            <div aria-hidden="true" className="flex h-2.5 overflow-hidden rounded-full bg-divider">
+              <div className="bg-primary" style={{ width: percentOfOriginal(r.totalCount) }} />
+              <div className="bg-[oklch(0.78_0.08_262)]" style={{ width: percentOfOriginal(r.cleaningStats.removedDuplicates) }} />
+              <div className="bg-[oklch(0.9_0.02_262)]" style={{ width: percentOfOriginal(r.cleaningStats.removedActivities) }} />
+            </div>
+            <div className="flex flex-wrap gap-x-[18px] gap-y-1.5 text-[13px] text-body">
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden="true" className="h-2 w-2 rounded-[2px] bg-primary" />
+                Kept <strong className="font-mono font-medium text-ink">{r.totalCount.toLocaleString()}</strong>
+              </span>
+              {r.cleaningStats.removedDuplicates > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden="true" className="h-2 w-2 rounded-[2px] bg-[oklch(0.78_0.08_262)]" />
+                  Duplicates removed <strong className="font-mono font-medium text-ink">{r.cleaningStats.removedDuplicates.toLocaleString()}</strong>
+                </span>
+              )}
+              {r.cleaningStats.removedActivities > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden="true" className="h-2 w-2 rounded-[2px] bg-[oklch(0.9_0.02_262)]" />
+                  Activities removed <strong className="font-mono font-medium text-ink">{r.cleaningStats.removedActivities.toLocaleString()}</strong>
+                </span>
+              )}
+              <span className="ml-auto">
+                of <strong className="font-mono font-medium text-ink">{r.originalCount.toLocaleString()}</strong> original
+              </span>
             </div>
           </div>
 
-          {/* Collapsible Intro Section */}
-          <div className="mb-12 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            <button
-              onClick={() => setIsIntroExpanded(!isIntroExpanded)}
-              className={`w-full flex items-center justify-between p-5 bg-white hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${isIntroExpanded ? 'border-b border-gray-100' : ''}`}
-            >
-              <span className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                <Info className="w-5 h-5 text-blue-600" />
-                How to Use This Tool
-              </span>
-              <ChevronDown
-                className={`w-6 h-6 text-gray-500 transition-transform duration-200 ${
-                  isIntroExpanded ? 'transform rotate-180' : ''
-                }`}
-              />
-            </button>
-
-            {isIntroExpanded && (
-              <div className="p-6 space-y-6 bg-gray-50/50">
-                {/* What This Does Section */}
-                <div className="p-6 bg-blue-50 rounded-xl relative shadow-sm border border-blue-100">
-                  <h2 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
-                    <AlertCircle className="w-6 h-6" />
-                    What Does This App Do?
-                  </h2>
-
-                  <div className="space-y-4 text-base text-blue-800 leading-relaxed">
-                    <p>
-                      <strong className="text-blue-900">The Problem:</strong> Google's 2024 format change broke compatibility.
-                      This tool unifies <code className="bg-blue-100 px-1 rounded font-mono text-sm">old (.json)</code> and <code className="bg-blue-100 px-1 rounded font-mono text-sm">new (Timeline.json)</code> formats into one clean, usable file.
-                    </p>
-
-                    <div className="p-4 bg-white rounded-xl shadow-inner">
-                      <p className="font-semibold mb-3 text-blue-900">Key Benefits:</p>
-                      <ul className="space-y-2 ml-6 list-disc text-base marker:text-blue-500">
-                        <li>Combine data from multiple accounts/years.</li>
-                        <li>Create custom travel maps in Google My Maps.</li>
-                        <li>Clean data to meet the 2,000-record (per layer) limit for Google My Maps import.</li>
-                        <li>Keep a permanent, unified history backup.</li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Step-by-Step Instructions */}
-                <div className="p-8 bg-white rounded-xl shadow-sm border border-gray-100">
-                  <h2 className="font-bold text-gray-900 mb-6 text-2xl flex items-center gap-2">
-                    <MapPin className="w-6 h-6" />
-                    Your Data Workflow
-                  </h2>
-
-                  <div className="space-y-8 text-base text-gray-700 leading-relaxed">
-                    <div>
-                      <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
-                        <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">1</span>
-                        Get OLD Timeline Data (Pre-2024)
-                      </h3>
-                      <ol className="list-decimal list-inside space-y-2 ml-10">
-                        <li>Go to <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">Google Takeout</a>, select "Location History (Timeline)" or "Takeout", and download the zip.</li>
-                        <li>Download the zip, and find files like <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">2018_JANUARY.json</code> in the extracted folder.</li>
-                      </ol>
-                    </div>
-
-                    <div>
-                      <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
-                        <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">2</span>
-                        Get NEW Timeline Data (2024+)
-                      </h3>
-                      <p className="mb-3 text-base text-red-700 font-semibold flex items-center gap-2">
-                        <AlertCircle className="w-5 h-5 text-red-500" />
-                        This data is only on your phone — not in Google Takeout!
-                      </p>
-                      <ol className="list-decimal list-inside space-y-2 ml-10">
-                        <li>On your phone: <strong className="text-gray-900">Settings → Location → Location Services → Timeline → Export Timeline Data.</strong></li>
-                        <li>Transfer the generated <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">Timeline.json</code> file to your computer.</li>
-                      </ol>
-                    </div>
-
-                    <div>
-                      <h3 className="font-extrabold mb-3 text-lg text-gray-900 flex items-center gap-2">
-                        <span className="text-xl font-mono px-3 py-1 bg-blue-200 text-blue-900 rounded-full">3</span>
-                        Upload & Download
-                      </h3>
-                      <ol className="list-decimal list-inside space-y-2 ml-10">
-                        <li>Use the "Choose Files" button below to select <strong>ALL</strong> your JSON files (old and new).</li>
-                        <li>Click "Process Files" and download the merged, cleaned data.</li>
-                      </ol>
-                    </div>
-
-                    <div className="p-4 bg-gray-200 rounded-xl mt-4">
-                      <p className="font-semibold text-gray-900 flex items-center gap-2">🔒 Privacy Note:</p>
-                      <p className="text-sm mt-1 ml-6">All processing happens directly in your browser. Your location data never leaves your device.</p>
-                    </div>
-                  </div>
-                </div>
+          <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-px overflow-hidden rounded-xl border border-[oklch(0.93_0.005_260)] bg-[oklch(0.93_0.005_260)]">
+            {[
+              { label: 'Place visits', value: r.visitCount, Icon: MapPin },
+              { label: 'Movement segments', value: r.activityCount, Icon: Activity },
+              { label: 'My Maps layers', value: parts, Icon: Layers },
+            ].map(({ label, value, Icon }) => (
+              <div key={label} className="bg-white px-3.5 py-3">
+                <dt className="flex items-center gap-[5px] text-xs text-muted">
+                  <Icon size={12} aria-hidden="true" />
+                  {label}
+                </dt>
+                <dd className="m-0 mt-1 font-mono text-xl font-medium">{value.toLocaleString()}</dd>
               </div>
-            )}
+            ))}
+          </dl>
+        </section>
+
+        {/* Download */}
+        <section className={`${cardClass} flex flex-col gap-4 p-6`}>
+          <h2 className="m-0 text-[17px] font-semibold">Download</h2>
+
+          {isSplit && (
+            <div className="flex items-start gap-2.5 rounded-[10px] bg-primary-tint px-3.5 py-3 text-[13.5px] leading-normal text-[oklch(0.38_0.1_262)]">
+              <Package size={16} className="mt-0.5 flex-none" aria-hidden="true" />
+              <span>
+                Split into <strong>{parts} files</strong> of ≤2,000 records each. CSV and KML download as a .zip. Import each file as its own layer.
+              </span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
+            <div className="flex flex-col gap-2.5 rounded-xl border-[1.5px] border-primary bg-[oklch(0.985_0.008_262)] p-4">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[15px] font-semibold">CSV</span>
+                <span className="rounded-full bg-[oklch(0.94_0.04_262)] px-2 py-0.5 text-[11px] font-semibold text-link">Recommended</span>
+              </div>
+              <p className="m-0 flex-1 text-[13px] leading-normal text-muted">Google My Maps, Excel and Sheets</p>
+              <button
+                type="button"
+                onClick={() => (isSplit
+                  ? downloadZip(r.csv, 'timeline_converted', 'csv')
+                  : downloadFile(r.csv[0], 'timeline_converted.csv', 'text/csv'))}
+                disabled={loadingZipFormat !== null}
+                className={`flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[9px] bg-primary text-sm font-semibold text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-70 ${focusRing}`}
+              >
+                {renderZipButtonContent('csv', parts)}
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2.5 rounded-xl border border-line p-4">
+              <span className="font-mono text-[15px] font-semibold">KML</span>
+              <p className="m-0 flex-1 text-[13px] leading-normal text-muted">Google Earth and other mapping software</p>
+              <button
+                type="button"
+                onClick={() => (isSplit
+                  ? downloadZip(r.kml, 'timeline_converted', 'kml')
+                  : downloadFile(r.kml[0], 'timeline_converted.kml', 'application/vnd.google-earth.kml+xml'))}
+                disabled={loadingZipFormat !== null}
+                className={`flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[9px] border border-[oklch(0.88_0.005_260)] bg-white text-sm font-semibold text-[oklch(0.25_0.02_260)] hover:bg-tile disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`}
+              >
+                {renderZipButtonContent('kml', parts)}
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2.5 rounded-xl border border-line p-4">
+              <span className="font-mono text-[15px] font-semibold">JSON</span>
+              <p className="m-0 flex-1 text-[13px] leading-normal text-muted">Permanent backup in the unified Google format</p>
+              <button
+                type="button"
+                onClick={() => downloadFile(r.oldFormatJson, 'timeline_converted.json', 'application/json')}
+                className={`flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[9px] border border-[oklch(0.88_0.005_260)] bg-white text-sm font-semibold text-[oklch(0.25_0.02_260)] hover:bg-tile ${focusRing}`}
+              >
+                <Download size={15} aria-hidden="true" />
+                Download
+              </button>
+            </div>
           </div>
 
-          {/* File Upload Section */}
-          <div className="mb-10 pt-4 border-t border-gray-100">
-            <h2 className="font-bold text-gray-900 mb-4 text-2xl flex items-center gap-2">
-              <Upload className="inline w-6 h-6 text-blue-600 mr-1" />
-              Upload Your Timeline Files
-            </h2>
+          {loadingZipFormat !== null && (
+            <p role="status" className="m-0 text-center text-[13px] text-muted">
+              Loading zip library… this only happens once.
+            </p>
+          )}
 
-            <div
-              className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer
-                ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50 hover:bg-gray-100 hover:border-gray-400'}`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+          <p className="m-0 flex gap-2 text-[13px] leading-normal text-muted">
+            <Info size={14} className="mt-0.5 flex-none" aria-hidden="true" />
+            <span>
+              Records from <code className="rounded bg-divider px-[5px] py-px font-mono text-xs">Timeline.json</code> don't include place names. Only the older format has them.
+            </span>
+          </p>
+        </section>
+
+        {/* Support */}
+        {showSupportCard && (
+          <section
+            ref={supportCardRef}
+            role="region"
+            aria-label="Support this tool"
+            className="relative flex scroll-mb-6 flex-wrap items-center gap-[18px] rounded-2xl border border-[oklch(0.9_0.1_100)] bg-[oklch(0.975_0.05_100)] pt-7 pr-[52px] pb-6 pl-6"
+          >
+            <button
+              type="button"
+              onClick={dismissSupportCard}
+              aria-label="Dismiss"
+              className={`absolute top-2 right-2 flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-full text-[oklch(0.45_0.04_90)] before:absolute before:-inset-2 before:content-[''] hover:bg-[oklch(0.94_0.07_100)] ${focusRing}`}
             >
-              <input
-                type="file"
-                multiple
-                accept=".json"
-                onChange={handleFileUpload}
-                ref={fileInputRef}
-                className="hidden"
-              />
-              <div className="flex flex-col items-center justify-center space-y-3">
-                <div className={`p-4 rounded-full transition-colors ${isDragging ? 'bg-blue-200 text-blue-700' : 'bg-gray-200 text-gray-600'}`}>
-                  <Upload className="w-8 h-8" />
+              <X size={12} aria-hidden="true" />
+            </button>
+            <div className="flex h-[52px] w-[52px] flex-none items-center justify-center rounded-full bg-coffee text-ink">
+              <Coffee size={26} aria-hidden="true" />
+            </div>
+            <div className="min-w-0 flex-[1_1_260px]">
+              <h3 className="m-0 text-[17px] font-bold tracking-[-0.01em]">
+                {hasDownloaded ? 'Your download has started' : 'Saved you an hour of cleanup?'}
+              </h3>
+              <p className="m-0 mt-1 text-sm leading-[1.55] text-pretty text-[oklch(0.38_0.03_80)]">
+                This tool is free, ad-free and built by one person. If it saved you an hour of cleanup, a coffee keeps it running.
+              </p>
+            </div>
+            <a
+              // Re-keyed on every download so the pulse animation restarts each time.
+              key={supportCardDownloadCount}
+              href={BUY_ME_A_COFFEE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => trackSupportClick('results_card')}
+              className={`inline-flex h-[46px] max-w-60 flex-[1_0_auto] items-center justify-center gap-2 rounded-full bg-coffee px-[22px] text-[15px] font-bold text-[oklch(0.2_0.02_260)] shadow-[0_2px_0_oklch(0.75_0.14_90)] hover:bg-coffee-hover ${focusRing} ${
+                supportCardDownloadCount > 0 ? 'motion-safe:animate-ring' : ''
+              }`}
+            >
+              <Coffee size={18} aria-hidden="true" />
+              Buy me a coffee
+            </a>
+          </section>
+        )}
+
+        {/* My Maps steps */}
+        <section className={`${cardClass} flex flex-col gap-3.5 p-6`}>
+          <h2 className="m-0 text-[17px] font-semibold">Make your map in Google My Maps</h2>
+          <ol className="m-0 flex list-none flex-col gap-3 p-0 text-sm leading-[1.55] text-body">
+            <li className="flex gap-3">
+              <span className="h-[22px] w-[22px] flex-none rounded-full bg-divider text-center font-mono text-xs leading-[22px] font-medium text-body">1</span>
+              <span>Open <a href="https://www.google.com/mymaps" target="_blank" rel="noopener noreferrer" className={linkClass}>Google My Maps</a> and click <strong className="font-semibold text-ink">Create a new map → Import</strong>.</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="h-[22px] w-[22px] flex-none rounded-full bg-divider text-center font-mono text-xs leading-[22px] font-medium text-body">2</span>
+              <span>Upload your CSV or KML. Pick <strong className="font-semibold text-ink">Latitude/Longitude</strong> for position and <strong className="font-semibold text-ink">Name</strong> for marker titles.</span>
+            </li>
+            {isSplit && (
+              <li className="flex gap-3">
+                <span className="h-[22px] w-[22px] flex-none rounded-full bg-[oklch(0.94_0.04_262)] text-center font-mono text-xs leading-[22px] font-medium text-[oklch(0.45_0.2_262)]">3</span>
+                <span><strong className="font-semibold text-ink">Multiple files:</strong> after the first import, click <strong className="font-semibold text-ink">Add layer</strong> and import the next file. Repeat for all {parts}.</span>
+              </li>
+            )}
+          </ol>
+          {r.totalCount > 10000 && (
+            <div role="alert" className="flex gap-2.5 rounded-[10px] bg-danger-tint px-3.5 py-3 text-[13.5px] leading-normal text-danger-ink">
+              <CircleAlert size={16} className="mt-0.5 flex-none text-danger" aria-hidden="true" />
+              <span><strong>Over the My Maps limit.</strong> One map holds up to 10,000 records; you have {r.totalCount.toLocaleString()}. Filter further or spread layers across multiple maps.</span>
+            </div>
+          )}
+        </section>
+
+        {/* Processing log */}
+        <section className="overflow-hidden rounded-2xl bg-[oklch(0.2_0.015_260)]">
+          <button
+            type="button"
+            onClick={() => setIsLogsOpen(!isLogsOpen)}
+            aria-expanded={isLogsOpen}
+            aria-controls="processing-log"
+            className={`flex w-full cursor-pointer items-center justify-between px-5 py-3.5 text-[oklch(0.85_0.01_260)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white`}
+          >
+            <span className="flex items-center gap-2.5 text-sm font-medium">
+              <Terminal size={16} aria-hidden="true" />
+              Processing log
+              <span className="font-mono text-xs font-normal text-[oklch(0.66_0.01_260)]">{r.processingLogs.length} lines</span>
+            </span>
+            <ChevronDown size={16} aria-hidden="true" className={`transition-transform duration-200 ${isLogsOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {isLogsOpen && (
+            <div id="processing-log" className="flex flex-col gap-3 px-5 pb-5">
+              <p className="m-0 text-[13px] text-[oklch(0.72_0.01_260)]">
+                If something looks wrong, download this log and share it when reporting an issue.
+              </p>
+              <div className="max-h-[300px] overflow-y-auto rounded-[10px] bg-[oklch(0.15_0.012_260)] px-3.5 py-3 font-mono text-xs leading-[1.7] text-[oklch(0.78_0.01_260)]">
+                {r.processingLogs.map((log, i) => (
+                  <div
+                    key={i}
+                    className={`wrap-anywhere whitespace-pre-wrap ${
+                      log.includes('ERROR') ? 'text-[oklch(0.72_0.16_25)]' : log.includes('===') ? 'text-[oklch(0.86_0.12_90)]' : ''
+                    }`}
+                  >
+                    {log}
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => downloadFile(r.processingLogs.join('\n'), 'processing_logs.txt', 'text/plain', false)}
+                className="flex h-9 cursor-pointer items-center gap-2 self-start rounded-[9px] border border-[oklch(0.4_0.015_260)] px-3.5 text-[13px] font-medium text-[oklch(0.9_0.01_260)] hover:bg-[oklch(0.26_0.015_260)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              >
+                <Download size={14} aria-hidden="true" />
+                Download log
+              </button>
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-page px-5 pt-12 pb-8 font-sans text-ink">
+      <div className="mx-auto flex max-w-[1040px] flex-col gap-5">
+
+        {/* Header */}
+        <header className="flex flex-wrap items-center justify-between gap-4 pb-3">
+          <div className="flex items-center gap-3.5">
+            <div className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-primary text-white">
+              <MapPin size={22} aria-hidden="true" />
+            </div>
+            <div>
+              <h1 className="m-0 text-[22px] leading-[1.2] font-bold tracking-[-0.02em]">Google Maps Timeline Converter</h1>
+              <p className="m-0 mt-0.5 text-sm text-muted">Merge, clean and convert Google Maps location history</p>
+            </div>
+          </div>
+          <a
+            href={BUY_ME_A_COFFEE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => trackSupportClick('header_pill')}
+            className={`inline-flex items-center gap-2 rounded-full border border-line bg-white py-[7px] pr-3 pl-2 text-[13px] font-medium text-body no-underline hover:border-[#E6C700] hover:bg-[oklch(0.985_0.03_100)] hover:text-ink ${focusRing}`}
+          >
+            <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-coffee text-ink">
+              <Coffee size={13} aria-hidden="true" />
+            </span>
+            Free &amp; ad-free · Support
+          </a>
+        </header>
+
+        <p className="-mt-2 mb-1 text-[17px] leading-[1.6] text-pretty text-body">
+          Google changed the Timeline format in 2024, splitting your history between old Takeout files and a new phone export. This tool merges both into one clean file you can map, sized to fit Google My Maps' 2,000-records-per-layer limit. Your files never leave your browser.
+        </p>
+
+        {/* How it works */}
+        <div className={`${cardClass} overflow-hidden`}>
+          <button
+            type="button"
+            onClick={() => setIsIntroExpanded(!isIntroExpanded)}
+            aria-expanded={isIntroExpanded}
+            aria-controls="how-it-works"
+            className="flex w-full cursor-pointer items-center justify-between gap-3 px-5 py-4 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+          >
+            <span className="flex items-center gap-2.5 text-[15px] font-semibold">
+              <Info size={18} className="flex-none text-primary" aria-hidden="true" />
+              How it works
+            </span>
+            <span className="flex items-center gap-2.5 text-[13px] text-muted">
+              <span className="flex items-center gap-1.5">
+                <Lock size={14} aria-hidden="true" />
+                Runs in your browser
+              </span>
+              <ChevronDown size={18} aria-hidden="true" className={`transition-transform duration-200 ${isIntroExpanded ? 'rotate-180' : ''}`} />
+            </span>
+          </button>
+
+          {isIntroExpanded && (
+            <div id="how-it-works" className="flex flex-col gap-4 px-5 pt-1 pb-5">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
+                <div className="flex flex-col gap-2 rounded-xl bg-tile p-4">
+                  <span className="font-mono text-xs font-medium text-primary">01 · PRE-2024</span>
+                  <p className="m-0 text-[15px] font-semibold">Old data from Takeout</p>
+                  <p className="m-0 text-sm leading-[1.55] text-muted">
+                    Export "Location History" from <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer" className={linkClass}>Google Takeout</a>. Find files like <code className="rounded border border-line bg-white px-[5px] py-px font-mono text-[13px]">2018_JANUARY.json</code>.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 rounded-xl bg-tile p-4">
+                  <span className="font-mono text-xs font-medium text-primary">02 · 2024+</span>
+                  <p className="m-0 text-[15px] font-semibold">New data from your phone</p>
+                  <p className="m-0 text-sm leading-[1.55] text-muted">
+                    Settings → Location → Location Services → Timeline → <strong className="font-semibold text-[oklch(0.25_0.02_260)]">Export Timeline Data</strong>. Copy <code className="rounded border border-line bg-white px-[5px] py-px font-mono text-[13px]">Timeline.json</code> to your computer.
+                  </p>
+                  <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-[oklch(0.96_0.025_25)] px-2 py-[3px] text-xs font-medium text-danger-ink">
+                    <CircleAlert size={12} aria-hidden="true" />
+                    Not in Takeout, phone only
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2 rounded-xl bg-tile p-4">
+                  <span className="font-mono text-xs font-medium text-primary">03 · CONVERT</span>
+                  <p className="m-0 text-[15px] font-semibold">Upload everything at once</p>
+                  <p className="m-0 text-sm leading-[1.55] text-muted">
+                    Drop <strong className="font-semibold text-[oklch(0.25_0.02_260)]">all</strong> your old and new JSON files below, process, then download.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Input group: hidden once results exist */}
+        {!results && (
+          <div className="flex flex-col gap-5">
+            <section className={`${cardClass} flex flex-col gap-4 p-5`}>
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="m-0 text-[17px] font-semibold tracking-[-0.01em]">Your timeline files</h2>
+                {hasFiles && (
+                  <button
+                    type="button"
+                    onClick={clearFiles}
+                    className={`cursor-pointer rounded p-0 text-[13px] font-medium text-muted hover:text-danger-ink ${focusRing}`}
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label="Add timeline JSON files"
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`flex cursor-pointer flex-col items-center gap-2.5 rounded-xl border-[1.5px] border-dashed text-center transition-all duration-150 ${focusRing} ${
+                  hasFiles ? 'p-5' : 'px-5 py-9'
+                } ${
+                  isDragging
+                    ? 'border-primary bg-primary-tint'
+                    : 'border-[oklch(0.86_0.008_260)] bg-page hover:border-[oklch(0.7_0.1_262)]'
+                }`}
+              >
+                <input
+                  type="file"
+                  multiple
+                  accept=".json"
+                  onChange={handleFileUpload}
+                  ref={fileInputRef}
+                  className="hidden"
+                  tabIndex={-1}
+                />
+                <div className={`flex h-11 w-11 items-center justify-center rounded-full ${isDragging ? 'bg-primary text-white' : 'bg-white text-muted'}`}>
+                  <Upload size={20} aria-hidden="true" />
                 </div>
                 <div>
-                  <p className="text-lg font-semibold text-gray-700">
-                    {isDragging ? 'Drop JSON files here...' : 'Drag & Drop JSON files here'}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">
-                    or click to browse your files
+                  <p className="m-0 text-[15px] font-semibold">{isDragging ? 'Drop to add files' : 'Drop your JSON files here'}</p>
+                  <p className="m-0 mt-1 text-[13px] text-muted">
+                    or <span className="font-medium text-link">browse</span> · .json files only
                   </p>
                 </div>
               </div>
-            </div>
 
-            {files.length > 0 && (
-              <div className="mt-4 p-4 bg-gray-100 rounded-xl shadow-inner">
-                <div className="flex justify-between items-center mb-2 border-b border-gray-200 pb-2">
-                  <p className="text-base font-semibold text-gray-700 flex items-center gap-1">
-                    <FileJson className="w-5 h-5 text-green-600" />
-                    {files.length} file(s) selected
-                  </p>
-                  <button
-                    onClick={clearFiles}
-                    className="text-sm text-red-600 hover:text-red-800 font-medium transition-colors bg-white px-2 py-1 rounded border border-red-200 shadow-sm hover:bg-red-50"
-                  >
-                    Clear All
-                  </button>
-                </div>
-                <ul className="text-sm text-gray-600 space-y-2 max-h-48 overflow-y-auto pt-2 pr-2">
-                  {files.map((f, i) => (
-                    <li key={i} className="flex justify-between items-center bg-white p-2 rounded border border-gray-200 shadow-sm">
-                      <span className="truncate flex-1" title={f.name}>• {f.name}</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); removeFile(i); }}
-                        className="ml-2 text-gray-400 hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50"
-                        title="Remove file"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-
-          {/* Data Cleaning Options */}
-          <div className="mb-10 p-6 bg-indigo-50/70 rounded-2xl shadow-lg">
-            <h3 className="font-bold text-indigo-900 mb-5 text-xl flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-indigo-700">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9.75 16.5c0 .375.362.583.636.436l7.5-4.5c.249-.15.249-.464 0-.614l-7.5-4.5c-.274-.147-.636.061-.636.437c.026.495-.15.976-.447 1.307" />
-              </svg>
-              Data Cleaning & Optimization
-            </h3>
-
-            <div className="space-y-6">
-              {/* Option 1 */}
-              <div className="flex items-start gap-4 p-3 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow">
-                <input
-                  type="checkbox"
-                  id="removeActivities"
-                  checked={removeActivities}
-                  onChange={(e) => setRemoveActivities(e.target.checked)}
-                  className="mt-1 w-6 h-6 text-blue-600 rounded-lg border-gray-300 focus:ring-blue-500 cursor-pointer flex-shrink-0"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="removeActivities" className="text-base font-semibold text-gray-900 cursor-pointer">
-                      Remove activity segments
-                      <span className="text-xs ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Recommended</span>
-                    </label>
-                    <div className="relative group">
-                      <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                        <strong>Purpose:</strong> Removes movement records (driving, walking, biking), leaving only "Visit" records (actual places you stopped).
-                        <br/><br/>
-                        <strong>Benefit:</strong> Dramatically reduces file size and complexity for mapping applications like Google My Maps.
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-500 mt-1">Keeps only actual place visits, ideal for creating maps.</p>
-                </div>
-              </div>
-
-              {/* Option 2 */}
-              <div className="flex items-start gap-4 p-3 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow">
-                <input
-                  type="checkbox"
-                  id="removeDuplicates"
-                  checked={removeDuplicates}
-                  onChange={(e) => setRemoveDuplicates(e.target.checked)}
-                  className="mt-1 w-6 h-6 text-blue-600 rounded-lg border-gray-300 focus:ring-blue-500 cursor-pointer flex-shrink-0"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="removeDuplicates" className="text-base font-semibold text-gray-900 cursor-pointer">
-                      Remove duplicate place visits
-                      <span className="text-xs ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Recommended</span>
-                    </label>
-                    <div className="relative group">
-                      <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                        <strong>Purpose:</strong> Identifies and removes redundant records at the exact same location (based on PlaceId or coordinates).
-                        <br/><br/>
-                        <strong>Smart Filtering:</strong> Keeps the record with the most detail (e.g., the one with a confirmed address) when duplicates are found.
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-500 mt-1">Cleans up redundant data points at the same spot.</p>
-                </div>
-              </div>
-
-              {/* Option 3 - NEW: Split files option */}
-              <div className="flex items-start gap-4 p-3 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow">
-                <input
-                  type="checkbox"
-                  id="splitFiles"
-                  checked={splitFiles}
-                  onChange={(e) => setSplitFiles(e.target.checked)}
-                  className="mt-1 w-6 h-6 text-blue-600 rounded-lg border-gray-300 focus:ring-blue-500 cursor-pointer flex-shrink-0"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="splitFiles" className="text-base font-semibold text-gray-900 cursor-pointer">
-                      Split files for Google My Maps import
-                      <span className="text-xs ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Recommended</span>
-                    </label>
-                    <div className="relative group">
-                      <Info className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-gray-800 text-white text-sm rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                        <strong>Purpose:</strong> Automatically splits your data into multiple files if you have more than 2,000 records.
-                        <br/><br/>
-                        <strong>Why?</strong> Google My Maps has a 2,000 record limit per layer. This option creates separate files (each with ≤2,000 records) so you can import them as individual layers.
-                        <br/><br/>
-                        <strong>Example:</strong> 5,875 records → 3 files (2,000 + 2,000 + 1,875)
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-500 mt-1">Automatically creates multiple files if you have &gt;2,000 records.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Process / Clear Button */}
-          {results ? (
-            <button
-              onClick={clearFiles}
-              className="w-full bg-white text-gray-700 border-2 border-gray-300 py-4 px-6 rounded-xl font-extrabold hover:bg-gray-50 hover:text-gray-900 transition-colors flex items-center justify-center gap-2 shadow-sm"
-            >
-              <RotateCcw className="w-5 h-5" />
-              Clear Data & Start Over
-            </button>
-          ) : (
-            <button
-              onClick={processFiles}
-              disabled={files.length === 0 || processing}
-              className="w-full bg-blue-600 text-white py-4 px-6 rounded-xl font-extrabold hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 shadow-sm"
-            >
-              {processing ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Processing your files...
-                </>
-              ) : 'Process Files'}
-            </button>
-          )}
-
-          {/* Error Display */}
-          {error && (
-            <div className="mt-6 p-4 bg-red-100 border-l-4 border-red-500 rounded-lg text-red-800 flex items-center gap-2 shadow-md">
-              <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
-              <div>
-                <strong className="text-base font-semibold">Processing Error:</strong> {error}
-              </div>
-            </div>
-          )}
-
-          {/* Results Section */}
-          {results && (
-            <div className="mt-12 space-y-8">
-              {/* Success Banner */}
-              <div className="p-5 bg-emerald-50 border-l-4 border-emerald-500 rounded-xl shadow-md">
-                <h3 className="font-bold text-emerald-900 mb-2 text-xl flex items-center gap-3">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Processing Complete!
-                </h3>
-                <p className="text-base text-emerald-800">Your data has been merged, cleaned, and is ready for download.</p>
-                {results.csv.length > 1 && (
-                  <p className="text-base text-emerald-800 mt-2 font-semibold">
-                    📦 Your data has been split into {results.csv.length} files for easy Google My Maps import.
-                  </p>
-                )}
-              </div>
-
-              {/* Consolidated Summary Card */}
-              <div className="p-6 bg-gray-100 rounded-2xl shadow-xl border border-gray-200">
-                <h3 className="font-bold text-gray-900 mb-5 text-xl">📊 Unified Data Summary</h3>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                  <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
-                    <p className="text-xs font-medium text-gray-500 uppercase">Original</p>
-                    <p className="text-2xl font-bold text-blue-700 mt-1">{results.originalCount.toLocaleString()}</p>
-                    <p className="text-xs text-gray-500 mt-1">Total Records</p>
-                  </div>
-
-                  <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
-                    <p className="text-xs font-medium text-gray-500 uppercase">Final</p>
-                    <p className="text-2xl font-bold text-green-700 mt-1">{results.totalCount.toLocaleString()}</p>
-                    <p className="text-xs text-gray-500 mt-1">Total Records</p>
-                  </div>
-
-                  <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
-                    <p className="text-xs font-medium text-gray-500 uppercase flex items-center justify-center gap-1"><MapPin className="w-3 h-3"/> Visits</p>
-                    <p className="text-2xl font-bold text-green-600 mt-1">{results.visitCount.toLocaleString()}</p>
-                    <p className="text-xs text-gray-500 mt-1">Place Stops</p>
-                  </div>
-
-                  <div className="p-4 bg-white rounded-xl shadow-md transition-all hover:bg-gray-50">
-                    <p className="text-xs font-medium text-gray-500 uppercase flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> Activity</p>
-                    <p className="text-2xl font-bold text-gray-600 mt-1">{results.activityCount.toLocaleString()}</p>
-                    <p className="text-xs text-gray-500 mt-1">Movement Segments</p>
-                  </div>
-                </div>
-
-                {results.cleaningStats.totalRemoved > 0 && (
-                  <div className="mt-6 pt-4 border-t border-gray-200">
-                    <h4 className="font-semibold text-gray-700 mb-3 text-lg">🧹 Cleaning Summary</h4>
-                    <div className="flex flex-wrap gap-3 text-sm">
-                      <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full font-medium shadow-sm">
-                        Total Removed: {results.cleaningStats.totalRemoved.toLocaleString()}
-                        ({Math.round(results.cleaningStats.totalRemoved / results.originalCount * 100)}% reduction)
-                      </span>
-                      {results.cleaningStats.removedActivities > 0 && (
-                        <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full font-medium shadow-sm">
-                          Activities Removed: {results.cleaningStats.removedActivities.toLocaleString()}
-                        </span>
-                      )}
-                      {results.cleaningStats.removedDuplicates > 0 && (
-                        <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full font-medium shadow-sm">
-                          Duplicates Removed: {results.cleaningStats.removedDuplicates.toLocaleString()}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Download Section */}
-              <div className="p-6 bg-blue-600/10 rounded-2xl shadow-lg">
-                <h3 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
-                  <Download className="w-6 h-6 text-blue-700" />
-                  Download Your Converted Files
-                </h3>
-
-                <div className="mb-6 p-4 bg-white rounded-xl text-base text-gray-800 shadow-md">
-                  <p className="font-semibold mb-3 text-gray-900">Which format should you choose?</p>
-                  <ul className="space-y-2 ml-6 list-disc marker:text-blue-500">
-                    <li><strong className="text-gray-900">CSV:</strong> Best for spreadsheet analysis (Excel, Sheets) and Google My Maps.</li>
-                    <li><strong className="text-gray-900">KML:</strong> For Google Earth or mapping software.</li>
-                    <li><strong className="text-gray-900">JSON:</strong> For a permanent backup in the unified Google format.</li>
-                  </ul>
-                  {results.csv.length > 1 && (
-                    <div className="mt-4 p-3 bg-blue-50 border-l-4 border-blue-500 rounded">
-                      <p className="font-semibold text-blue-900">📦 Multiple Files Generated</p>
-                      <p className="text-sm text-blue-800 mt-1">
-                        Your data has been split into {results.csv.length} files. Each file contains 2,000 or fewer records.
-                        Click the download button to get all files as a zip archive, then import each file as a separate layer in Google My Maps.
-                      </p>
-                    </div>
-                  )}
-                  <p className="mt-4"><strong>Note</strong>: Newer records from <code className="bg-gray-200 px-2 py-1 rounded text-sm font-mono text-gray-700">timeline.json</code> don't include place names; only the old format has those.</p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <button
-                    onClick={() => results.csv.length === 1
-                      ? downloadFile(results.csv[0], 'timeline_converted.csv', 'text/csv')
-                      : downloadZip(results.csv, 'timeline_converted', 'csv')
-                    }
-                    disabled={isLoadingJSZip}
-                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors font-extrabold shadow-lg"
-                  >
-                    <FileText className="w-6 h-6" />
-                    <div className="text-center sm:text-left">
-                      <div>CSV {results.csv.length > 1 && `(${results.csv.length} files)`}</div>
-                      <div className="text-xs font-normal opacity-90">Recommended</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => results.kml.length === 1
-                      ? downloadFile(results.kml[0], 'timeline_converted.kml', 'application/vnd.google-earth.kml+xml')
-                      : downloadZip(results.kml, 'timeline_converted', 'kml')
-                    }
-                    disabled={isLoadingJSZip}
-                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg font-extrabold"
-                  >
-                    <MapPin className="w-6 h-6" />
-                    <div className="text-center sm:text-left">
-                      KML {results.kml.length > 1 && `(${results.kml.length} files)`}
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => downloadFile(results.oldFormatJson, 'timeline_converted.json', 'application/json')}
-                    className="flex flex-col sm:flex-row items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white py-4 px-4 rounded-xl transition-colors text-base shadow-lg transform hover:scale-105 font-extrabold"
-                  >
-                    <FileJson className="w-6 h-6" />
-                    JSON
-                  </button>
-                </div>
-
-                {isLoadingJSZip && (
-                  <div className="mt-4 p-3 bg-blue-50 rounded-xl text-center text-blue-800">
-                    <p className="text-sm">Loading zip library... This only happens once.</p>
-                  </div>
-                )}
-
-                {/* Download-Triggered Support Card */}
-                {showSupportCard && (
-                  <div
-                    ref={supportCardRef}
-                    role="region"
-                    aria-label="Support this tool"
-                    className="relative mt-6 scroll-mb-6 p-5 sm:p-6 bg-white border-2 border-[#FFDD00] rounded-2xl shadow-lg"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowSupportCard(false);
-                        if (window.gtag) {
-                          window.gtag('event', 'support_card_dismiss', {
-                            promotion_name: 'buy_me_a_coffee',
-                            placement: 'post_download_card',
-                          });
-                        }
-                      }}
-                      aria-label="Dismiss"
-                      className="absolute top-1 right-1 sm:top-2 sm:right-2 flex items-center justify-center w-10 h-10 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                    <div className="flex flex-col lg:flex-row items-center gap-4 lg:gap-6 text-center lg:text-left lg:pr-8">
-                      <div className="w-14 h-14 flex-shrink-0 bg-[#FFDD00] rounded-full flex items-center justify-center">
-                        <Coffee className="w-7 h-7 text-gray-900" />
-                      </div>
-                      <div className="flex-1 max-w-lg lg:max-w-none">
-                        <h3 className="text-xl font-bold text-gray-900 mb-1">Your files are ready</h3>
-                        <p className="text-gray-700 text-base">
-                          This tool is free, ad-free and built by one person. If it saved you an hour of cleanup, a coffee keeps it running.
-                        </p>
-                      </div>
-                      <a
-                        href="https://buymeacoffee.com/scivolette"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full sm:w-auto flex-shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#FFDD00] hover:bg-[#FFD000] text-gray-900 font-extrabold rounded-full transition-transform transform hover:scale-105 active:scale-95 shadow-md"
-                        onClick={() => trackSupportClick('post_download_card')}
-                      >
-                        <Coffee className="w-5 h-5" />
-                        Buy me a coffee
-                      </a>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Next Steps Section */}
-              <div className="p-6 bg-gray-100 rounded-2xl shadow-inner border border-gray-200">
-                <h3 className="font-bold text-gray-900 mb-4 text-xl flex items-center gap-2">
-                  <MapPin className="w-6 h-6" />
-                  Next Steps: Creating Your Map
-                </h3>
-                <div className="text-base text-gray-800 space-y-3 leading-relaxed">
-                  <p><strong className="text-gray-900">To create a map in Google My Maps:</strong></p>
-                  <ol className="list-decimal list-inside space-y-2 ml-4 marker:text-gray-600">
-                    <li>Go to <a href="https://www.google.com/mymaps" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Google My Maps</a>.</li>
-                    <li>Click "Create a new map" then "Import" and upload your CSV or KML file.</li>
-                    {results.csv.length > 1 && (
-                      <li className="font-semibold text-blue-900">
-                        <strong>Multiple files:</strong> Import each file as a separate layer. After importing the first file, click "Add layer" in the left sidebar, then import the next file. Repeat for all files.
+              {hasFiles && (
+                <ul className="m-0 flex max-h-[220px] list-none flex-col overflow-x-hidden overflow-y-auto rounded-[10px] border border-line p-0">
+                  {files.map(({ id, file, format }) => {
+                    const tag = FORMAT_TAGS[format];
+                    return (
+                      <li key={id} className="flex items-center gap-2.5 border-b border-divider py-1 pr-1.5 pl-2.5 last:border-b-0">
+                        <FileJson size={14} aria-hidden="true" className={`flex-none ${format === 'unknown' ? 'text-danger' : 'text-faint'}`} />
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-body" title={file.name}>{file.name}</span>
+                        {tag && (
+                          <span className={`rounded-full px-1.5 py-px font-mono text-[10.5px] font-medium ${tag.className}`}>{tag.label}</span>
+                        )}
+                        <span className="w-[52px] text-right font-mono text-[11.5px] text-muted">{formatFileSize(file.size)}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); removeFile(id); }}
+                          aria-label={`Remove ${file.name}`}
+                          title="Remove file"
+                          className={`relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-faint before:absolute before:-inset-x-2 before:-inset-y-1 before:content-[''] hover:bg-danger-tint hover:text-danger-ink ${focusRing}`}
+                        >
+                          <X size={12} aria-hidden="true" />
+                        </button>
                       </li>
-                    )}
-                    <li>Follow the prompts to select <strong className="text-gray-900">Latitude/Longitude</strong> for positioning and <strong className="text-gray-900">Name</strong> for the marker title.</li>
-                  </ol>
-                  {results.totalCount > 10000 && (
-                    <div className="mt-4 p-4 bg-red-50 border-l-4 border-red-500 rounded text-red-800 shadow-sm">
-                      <p className="font-semibold text-red-900 text-base flex items-center gap-2">
-                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                        My Maps Total Limit Warning: {results.totalCount.toLocaleString()} records detected
-                      </p>
-                      <p className="mt-2">Google My Maps has a <strong>10,000 record maximum per map</strong>. You have {results.totalCount.toLocaleString()} records. Consider filtering your data further or creating multiple maps.</p>
-                    </div>
-                  )}
-                  <p className="pt-3 text-sm text-gray-500">
-                    Free and ad-free, built by one person.{' '}
-                    <a
-                      href="https://buymeacoffee.com/scivolette"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-gray-800"
-                      onClick={() => trackSupportClick('next_steps_link')}
-                    >
-                      Buy me a coffee
-                    </a>
-                    {' '}if it helped.
-                  </p>
-                </div>
-              </div>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
 
-              {/* Processing Logs Section */}
-              <div className="p-6 bg-gray-800 rounded-2xl shadow-lg">
-                <button onClick={() => setIsLogsOpen(!isLogsOpen)} className="w-full flex justify-between items-center">
-                  <h3 className="font-bold text-gray-100 text-xl flex items-center gap-2">
-                    <FileText className="w-6 h-6 text-blue-400" />
-                    Processing Logs
-                  </h3>
-                  <ChevronDown className={`w-6 h-6 text-gray-400 transition-transform ${isLogsOpen ? 'rotate-180' : ''}`} />
+            <section className={`${cardClass} px-5 py-2`}>
+              <OptionRow
+                title="Remove activity segments"
+                description="Keep only places you stopped at. Ideal for maps."
+                tip="Removes movement records (driving, walking, biking), leaving only visits. Dramatically reduces file size for tools like Google My Maps."
+                checked={removeActivities}
+                onChange={setRemoveActivities}
+              />
+              <OptionRow
+                title="Remove duplicate visits"
+                description="Merge repeat records at the same spot."
+                tip="Matches by PlaceId or coordinates and keeps the record with the most detail, such as one with a name or address."
+                checked={removeDuplicates}
+                onChange={setRemoveDuplicates}
+              />
+              <OptionRow
+                title="Split for Google My Maps"
+                description="Create multiple files when over 2,000 records."
+                tip="My Maps allows 2,000 records per layer. Example: 5,875 records → 3 files (2,000 + 2,000 + 1,875), each imported as its own layer."
+                checked={splitFiles}
+                onChange={setSplitFiles}
+                isLast
+              />
+            </section>
+
+            <button
+              type="button"
+              onClick={() => processFiles()}
+              disabled={!hasFiles || processing}
+              className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl text-[15px] font-semibold transition-colors duration-150 disabled:cursor-not-allowed ${focusRing} ${
+                processing
+                  ? 'bg-primary text-white'
+                  : hasFiles
+                    ? 'cursor-pointer bg-ink text-white'
+                    : 'bg-[oklch(0.93_0.005_260)] text-faint'
+              }`}
+            >
+              {processing && <Spinner />}
+              {convertLabel}
+            </button>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div role="alert" className="flex gap-3 rounded-xl border border-danger-line bg-danger-tint p-4">
+            <CircleAlert size={20} className="mt-px flex-none text-danger" aria-hidden="true" />
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <p className="m-0 text-[15px] font-semibold text-[oklch(0.4_0.15_25)] wrap-anywhere">
+                {error.fileName ? `Couldn't read ${error.fileName}` : 'Something went wrong'}
+              </p>
+              <p className="m-0 text-[13.5px] leading-[1.55] text-danger-ink wrap-anywhere">{error.message}</p>
+              {failedFileLabel && (
+                <button
+                  type="button"
+                  onClick={retryWithoutFailedFile}
+                  className={`mt-1 max-w-full cursor-pointer self-start rounded-lg border border-danger-line bg-white px-2.5 py-1.5 text-left text-[13px] font-medium text-danger-ink wrap-anywhere hover:bg-danger-tint ${focusRing}`}
+                >
+                  {files.length > 1 ? `Remove ${failedFileLabel} and retry` : `Remove ${failedFileLabel}`}
                 </button>
-                {isLogsOpen && (
-                  <div className="mt-4">
-                    <p className="text-sm text-gray-300 mb-4">
-                      Detailed information about how your files were processed. If you encounter any issues,
-                      please download these logs and share them for troubleshooting.
-                    </p>
-
-                    <div className="bg-gray-900 rounded-xl p-4 max-h-96 overflow-y-auto font-mono text-xs text-green-400 mb-4">
-                      {results.processingLogs.map((log, i) => (
-                        <div key={i} className={`py-1 ${log.includes('ERROR') ? 'text-red-400 font-bold' : log.includes('===') ? 'text-yellow-400 font-bold' : ''}`}>
-                          {log}
-                        </div>
-                      ))}
-                    </div>
-
-                    <button
-                      onClick={() => downloadFile(results.processingLogs.join('\n'), 'processing_logs.txt', 'text/plain', false)}
-                      className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-xl transition-colors font-semibold text-sm shadow-lg flex items-center justify-center gap-2"
-                    >
-                      <Download className="w-5 h-5" />
-                      Download Processing Logs
-                    </button>
-                  </div>
-                )}
-              </div>
-
+              )}
+              <p className="m-0 mt-1.5 text-[13px] text-danger-ink">
+                Need to report an issue?{' '}
+                <a href={ISSUES_URL} target="_blank" rel="noopener noreferrer" className="font-semibold text-danger-ink underline underline-offset-2">
+                  Open a GitHub issue
+                </a>
+              </p>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {results && renderResults(results)}
 
         {/* Footer */}
-        <div className="text-center mt-12 py-6 border-t border-gray-200">
-          <p className="mt-2 text-gray-500">
-            Made with ❤️ for travelers, data enthusiasts, and anyone who wants to visualize their journey through life.
-          </p>
-          <div className="mt-4 text-center text-slate-500">
-            <p>Built by <a href="https://www.facebook.com/scivolette" target="_blank" rel="noopener noreferrer" className="font-semibold text-slate-600 hover:text-blue-600 transition-colors underline">Brandon Scivolette</a></p>
-            <div className="flex justify-center items-center space-x-4 mt-2">
-              <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 transition-colors underline">GitHub</a>
-              <span className="text-gray-300">|</span>
-              <a href="https://linke.ro/brandon" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 transition-colors underline">Linke</a>
-            </div>
-          </div>
-        </div>
+        <footer className="mt-7 flex flex-wrap justify-between gap-2.5 border-t border-line pt-5 text-[13px] text-muted">
+          <span>
+            Built by <a href="https://www.facebook.com/scivolette" target="_blank" rel="noopener noreferrer" className="font-medium text-body">Brandon Scivolette</a> for travelers and data nerds.
+          </span>
+          <span className="flex gap-3.5">
+            <a href="https://github.com/BrandonML/google-maps-timeline-converter" target="_blank" rel="noopener noreferrer" className="text-inherit">GitHub</a>
+            <a href="https://linke.ro/brandon" target="_blank" rel="noopener noreferrer" className="text-inherit">Linke</a>
+            <a href={BUY_ME_A_COFFEE_URL} target="_blank" rel="noopener noreferrer" onClick={() => trackSupportClick('footer_link')} className="text-inherit">Buy me a coffee</a>
+          </span>
+        </footer>
       </div>
     </div>
   );

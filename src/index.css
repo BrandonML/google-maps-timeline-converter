@@ -1,4 +1,61 @@
-/* @tailwind base;
-@tailwind components;
-@tailwind utilities; */
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Surfaces and text */
+  --color-page: oklch(0.985 0.003 250);
+  --color-tile: oklch(0.975 0.004 250);
+  --color-line: oklch(0.92 0.005 260);
+  --color-divider: oklch(0.95 0.004 260);
+  --color-ink: oklch(0.22 0.02 260);
+  --color-body: oklch(0.38 0.02 260);
+  /* Muted/faint are tuned to stay at or above 4.5:1 on white and the page background. */
+  --color-muted: oklch(0.48 0.02 260);
+  --color-faint: oklch(0.6 0.02 260);
+
+  /* Brand */
+  --color-primary: oklch(0.55 0.2 262);
+  --color-primary-hover: oklch(0.48 0.2 262);
+  --color-primary-tint: oklch(0.97 0.02 262);
+  --color-link: oklch(0.5 0.2 262);
+  --color-link-hover: oklch(0.4 0.18 262);
+
+  /* Status */
+  --color-danger: oklch(0.55 0.2 25);
+  --color-danger-ink: oklch(0.45 0.15 25);
+  --color-danger-tint: oklch(0.97 0.018 25);
+  --color-danger-line: oklch(0.9 0.05 25);
+  --color-success: oklch(0.5 0.13 160);
+  --color-success-tint: oklch(0.95 0.05 160);
+
+  /* Support */
+  --color-coffee: #ffdd00;
+  --color-coffee-hover: #ffd000;
+
+  --animate-spin-fast: spin-fast 0.8s linear infinite;
+  --animate-ring: ring 1.6s ease-out 2;
+
+  @keyframes spin-fast {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes ring {
+    0% {
+      box-shadow: 0 0 0 0 rgba(255, 221, 0, 0.7);
+    }
+    100% {
+      box-shadow: 0 0 0 14px rgba(255, 221, 0, 0);
+    }
+  }
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-page);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}

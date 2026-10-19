@@ -47,6 +47,10 @@ jobs:
         run: npm run lint
         continue-on-error: false
 
+      - name: Run unit tests
+        run: npm test
+        continue-on-error: false
+
       - name: Build production app
         run: npm run build
         continue-on-error: false
