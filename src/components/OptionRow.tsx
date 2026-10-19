@@ -3,18 +3,19 @@ import { Info } from 'lucide-react';
 
 interface InfoTipProps {
   id: string;
+  label: string;
   text: string;
 }
 
 /** Tooltip that opens on hover or keyboard focus, and closes with Escape. */
-function InfoTip({ id, text }: InfoTipProps) {
+function InfoTip({ id, label, text }: InfoTipProps) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
       <button
         type="button"
-        aria-label="More information"
+        aria-label={label}
         aria-describedby={id}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
@@ -60,7 +61,7 @@ export function OptionRow({ title, description, tip, checked, onChange, isLast =
       <div className="relative min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span id={titleId} className="text-[15px] font-semibold">{title}</span>
-          <InfoTip id={tipId} text={tip} />
+          <InfoTip id={tipId} label={`More information about ${title}`} text={tip} />
         </div>
         <p id={descId} className="mt-[3px] text-[13.5px] leading-normal text-muted">{description}</p>
       </div>

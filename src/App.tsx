@@ -652,6 +652,8 @@ End: ${pv.duration.endTimestamp}]]></description>
     clearFiles();
     setResults(null);
     setHasDownloaded(false);
+    setSupportCardDownloadCount(0);
+    setIsLogsOpen(false);
     setIsIntroExpanded(true);
     window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   };
@@ -1117,7 +1119,7 @@ End: ${pv.duration.endTimestamp}]]></description>
               rel="noopener noreferrer"
               onClick={() => trackSupportClick('results_card')}
               className={`inline-flex h-[46px] max-w-60 flex-[1_0_auto] items-center justify-center gap-2 rounded-full bg-coffee px-[22px] text-[15px] font-bold text-[oklch(0.2_0.02_260)] shadow-[0_2px_0_oklch(0.75_0.14_90)] hover:bg-coffee-hover ${focusRing} ${
-                supportCardDownloadCount > 0 ? 'motion-safe:animate-ring' : ''
+                hasDownloaded ? 'motion-safe:animate-ring' : ''
               }`}
             >
               <Coffee size={18} aria-hidden="true" />
