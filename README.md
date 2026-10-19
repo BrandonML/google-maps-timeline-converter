@@ -54,10 +54,10 @@ This app solves these problems by converting, cleaning, and merging your Google 
 ### Using the App
 
 1. **Open the Webapp** - Open [the webapp](https://brandonml.github.io/google-maps-timeline-converter/) in your browser.
-2. **Upload your files** - Select all your old monthly JSON files AND your new `Timeline.json` file.
-3. **Choose cleaning options** - Keep both options checked to remove duplicates and unnecessary data.
-4. **Click "Process Files"** - The app merges and cleans everything.
-5. **Download your results** - Get CSV (for Google My Maps), KML (for mapping tools), or JSON (for backup).
+2. **Add your files** - Drag and drop (or browse for) all your old monthly JSON files AND your new `Timeline.json` file. Each file is labeled **Pre-2024** or **2024+** so you can spot a wrong file before converting.
+3. **Choose cleaning options** - Keep the three toggles on to remove activity segments, remove duplicates, and split the result into files of 2,000 records or fewer for Google My Maps.
+4. **Click "Convert"** - The app merges and cleans everything. If a file can't be read, the error names it and offers to remove it and retry.
+5. **Download your results** - Get CSV (for Google My Maps), KML (for mapping tools), or JSON (for backup). Use **Start over** to convert a new set of files.
 6. **Getting place names** - Newer records in `timeline.json` don't include the place name. If you want to enhance your timeline data by retrieving the place name, you can use the apps script provided in the `tools` folder. Be sure to review the README in that directory for more information.
 
 ### Privacy Note
@@ -76,6 +76,8 @@ This is a React + TypeScript + Vite application using Tailwind CSS v4 for stylin
 - **Vite 7** for fast development and building
 - **Tailwind CSS v4** via `@tailwindcss/vite` plugin
 - **Lucide React** for icons
+- **Vitest** for unit tests
+- **Geist / Geist Mono** fonts, loaded from Google Fonts in `index.html`
 
 ### Project Setup
 
@@ -85,6 +87,9 @@ npm install
 
 # Run development server
 npm run dev
+
+# Run unit tests
+npm test
 
 # Build for production
 npm run build
@@ -100,8 +105,10 @@ The app will be available at `http://localhost:5173`
 ```
 src/
   ├── App.tsx          # Main application component
+  ├── components/      # Small UI pieces (option toggles and tooltips)
+  ├── lib/             # Pure helpers with unit tests (file format detection, formatting)
   ├── main.tsx         # React app entry point
-  └── index.css        # Tailwind CSS imports
+  └── index.css        # Tailwind import plus design tokens (colors, fonts, animations)
 ```
 
 ### Tailwind Configuration
@@ -110,13 +117,13 @@ This project uses **Tailwind CSS v4** with the Vite plugin. The configuration is
 
 - **`vite.config.ts`** - Includes `@tailwindcss/vite` plugin
 - **`postcss.config.js`** - Uses `@tailwindcss/postcss` adapter
-- **`src/index.css`** - Contains `@import "tailwindcss";`
+- **`src/index.css`** - Contains `@import "tailwindcss";` and an `@theme` block with the design tokens and keyframes
 
 **Important:** Do NOT mix Tailwind v3 and v4 syntax. Use `@import "tailwindcss";` in your CSS, not the old `@tailwind` directives.
 
 ### Key Features
 
-- **Format Detection** - Automatically detects old (timelineObjects) vs new (semanticSegments) JSON formats
+- **Format Detection** - Automatically detects old (timelineObjects) vs new (semanticSegments) JSON formats, and labels each file in the list from a small sample of its contents
 - **Data Conversion** - Converts new format to old format structure for compatibility
 - **Smart Cleaning** - Removes activity records and duplicates while preserving valuable address data
 - **Multi-Format Export** - Generates JSON, CSV, and KML outputs
